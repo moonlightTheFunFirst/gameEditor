@@ -2,13 +2,24 @@ namespace GameEditor;
 
 public sealed class TileSet : IDisposable
 {
-    private TileSet(int index, string name, TileSetKind kind, Bitmap image, string sourcePath, int tileSize, Color? transparentColor)
+    private TileSet(
+        int index,
+        string id,
+        string name,
+        TileSetKind kind,
+        Bitmap image,
+        string sourcePath,
+        string imagePath,
+        int tileSize,
+        Color? transparentColor)
     {
         Index = index;
+        Id = id;
         Name = name;
         Kind = kind;
         Image = image;
         SourcePath = sourcePath;
+        ImagePath = imagePath;
         TileSize = tileSize;
         TransparentColor = transparentColor;
         Columns = image.Width / tileSize;
@@ -17,6 +28,8 @@ public sealed class TileSet : IDisposable
 
     public int Index { get; }
 
+    public string Id { get; }
+
     public string Name { get; }
 
     public TileSetKind Kind { get; }
@@ -24,6 +37,8 @@ public sealed class TileSet : IDisposable
     public Bitmap Image { get; }
 
     public string SourcePath { get; }
+
+    public string ImagePath { get; }
 
     public int TileSize { get; }
 
@@ -35,7 +50,15 @@ public sealed class TileSet : IDisposable
 
     public int TileCount => Columns * Rows;
 
-    public static TileSet Load(int index, string name, TileSetKind kind, string path, int tileSize, Color? transparentColor = null)
+    public static TileSet Load(
+        int index,
+        string id,
+        string name,
+        TileSetKind kind,
+        string path,
+        string imagePath,
+        int tileSize,
+        Color? transparentColor = null)
     {
         if (tileSize <= 0)
         {
@@ -51,7 +74,7 @@ public sealed class TileSet : IDisposable
             throw new InvalidOperationException($"Tileset size must be divisible by {tileSize}. Actual: {source.Width}x{source.Height}");
         }
 
-        return new TileSet(index, name, kind, image, path, tileSize, transparentColor);
+        return new TileSet(index, id, name, kind, image, path, imagePath, tileSize, transparentColor);
     }
 
     public Rectangle GetSourceRectangle(int tileId)

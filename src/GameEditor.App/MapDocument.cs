@@ -49,6 +49,23 @@ public sealed class MapDocument
         return GetLayer(kind)[x, y];
     }
 
+    public IEnumerable<(int X, int Y, TilePlacement Placement)> EnumerateTiles(TileSetKind kind)
+    {
+        var layer = GetLayer(kind);
+
+        for (var y = 0; y < Height; y++)
+        {
+            for (var x = 0; x < Width; x++)
+            {
+                var placement = layer[x, y];
+                if (!placement.IsEmpty)
+                {
+                    yield return (x, y, placement);
+                }
+            }
+        }
+    }
+
     public void SetTile(TileSetKind kind, int x, int y, TilePlacement placement)
     {
         if (!IsInside(x, y))

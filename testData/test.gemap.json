@@ -1,0 +1,270 @@
+﻿{
+    "header":  {
+                   "format":  "gameEditor.map",
+                   "schemaVersion":  1,
+                   "createdWith":  "gameEditor",
+                   "editorVersion":  "1.0.0+ffdb071202cd0370c25fcbf8894722617eb18dae",
+                   "savedAt":  "2026-05-02T16:30:32.9480881+09:00",
+                   "attributes":  {
+
+                                  }
+               },
+    "map":  {
+                "name":  "test",
+                "width":  40,
+                "height":  30,
+                "tileSize":  32,
+                "attributes":  {
+
+                               }
+            },
+    "tileSets":  [
+                     {
+                         "id":  "base",
+                         "name":  "ベース",
+                         "kind":  "base",
+                         "image":  "resources/image/base_tiles.bmp",
+                         "tileSize":  32,
+                         "attributes":  {
+
+                                        }
+                     },
+                     {
+                         "id":  "advanced",
+                         "name":  "アドバンス",
+                         "kind":  "advanced",
+                         "image":  "resources/image/advanced_tiles.bmp",
+                         "tileSize":  32,
+                         "transparentColor":  "#FF00FF",
+                         "attributes":  {
+
+                                        }
+                     }
+                 ],
+    "layers":  [
+                   {
+                       "id":  "base",
+                       "name":  "ベース",
+                       "kind":  "base",
+                       "visible":  true,
+                       "locked":  false,
+                       "zIndex":  0,
+                       "tiles":  [
+                                     {
+                                         "x":  1,
+                                         "y":  2,
+                                         "tileSetId":  "base",
+                                         "tileId":  0,
+                                         "attributes":  {
+
+                                                        }
+                                     },
+                                     {
+                                         "x":  2,
+                                         "y":  2,
+                                         "tileSetId":  "base",
+                                         "tileId":  0,
+                                         "attributes":  {
+
+                                                        }
+                                     },
+                                     {
+                                         "x":  3,
+                                         "y":  2,
+                                         "tileSetId":  "base",
+                                         "tileId":  0,
+                                         "attributes":  {
+
+                                                        }
+                                     },
+                                     {
+                                         "x":  4,
+                                         "y":  2,
+                                         "tileSetId":  "base",
+                                         "tileId":  0,
+                                         "attributes":  {
+
+                                                        }
+                                     },
+                                     {
+                                         "x":  1,
+                                         "y":  3,
+                                         "tileSetId":  "base",
+                                         "tileId":  0,
+                                         "attributes":  {
+
+                                                        }
+                                     },
+                                     {
+                                         "x":  2,
+                                         "y":  3,
+                                         "tileSetId":  "base",
+                                         "tileId":  0,
+                                         "attributes":  {
+
+                                                        }
+                                     },
+                                     {
+                                         "x":  3,
+                                         "y":  3,
+                                         "tileSetId":  "base",
+                                         "tileId":  0,
+                                         "attributes":  {
+
+                                                        }
+                                     },
+                                     {
+                                         "x":  4,
+                                         "y":  3,
+                                         "tileSetId":  "base",
+                                         "tileId":  0,
+                                         "attributes":  {
+
+                                                        }
+                                     },
+                                     {
+                                         "x":  1,
+                                         "y":  4,
+                                         "tileSetId":  "base",
+                                         "tileId":  1,
+                                         "attributes":  {
+
+                                                        }
+                                     },
+                                     {
+                                         "x":  2,
+                                         "y":  4,
+                                         "tileSetId":  "base",
+                                         "tileId":  1,
+                                         "attributes":  {
+
+                                                        }
+                                     },
+                                     {
+                                         "x":  3,
+                                         "y":  4,
+                                         "tileSetId":  "base",
+                                         "tileId":  1,
+                                         "attributes":  {
+
+                                                        }
+                                     },
+                                     {
+                                         "x":  4,
+                                         "y":  4,
+                                         "tileSetId":  "base",
+                                         "tileId":  1,
+                                         "attributes":  {
+
+                                                        }
+                                     },
+                                     {
+                                         "x":  1,
+                                         "y":  5,
+                                         "tileSetId":  "base",
+                                         "tileId":  2,
+                                         "attributes":  {
+
+                                                        }
+                                     },
+                                     {
+                                         "x":  2,
+                                         "y":  5,
+                                         "tileSetId":  "base",
+                                         "tileId":  2,
+                                         "attributes":  {
+
+                                                        }
+                                     },
+                                     {
+                                         "x":  3,
+                                         "y":  5,
+                                         "tileSetId":  "base",
+                                         "tileId":  2,
+                                         "attributes":  {
+
+                                                        }
+                                     },
+                                     {
+                                         "x":  4,
+                                         "y":  5,
+                                         "tileSetId":  "base",
+                                         "tileId":  2,
+                                         "attributes":  {
+
+                                                        }
+                                     }
+                                 ],
+                       "attributes":  {
+
+                                      }
+                   },
+                   {
+                       "id":  "advanced",
+                       "name":  "アドバンス",
+                       "kind":  "advanced",
+                       "visible":  true,
+                       "locked":  false,
+                       "zIndex":  100,
+                       "tiles":  [
+                                     {
+                                         "x":  2,
+                                         "y":  3,
+                                         "tileSetId":  "advanced",
+                                         "tileId":  0,
+                                         "attributes":  {
+
+                                                        }
+                                     },
+                                     {
+                                         "x":  3,
+                                         "y":  3,
+                                         "tileSetId":  "advanced",
+                                         "tileId":  0,
+                                         "attributes":  {
+
+                                                        }
+                                     },
+                                     {
+                                         "x":  1,
+                                         "y":  4,
+                                         "tileSetId":  "advanced",
+                                         "tileId":  1,
+                                         "attributes":  {
+
+                                                        }
+                                     },
+                                     {
+                                         "x":  2,
+                                         "y":  4,
+                                         "tileSetId":  "advanced",
+                                         "tileId":  1,
+                                         "attributes":  {
+
+                                                        }
+                                     },
+                                     {
+                                         "x":  3,
+                                         "y":  4,
+                                         "tileSetId":  "advanced",
+                                         "tileId":  1,
+                                         "attributes":  {
+
+                                                        }
+                                     },
+                                     {
+                                         "x":  4,
+                                         "y":  4,
+                                         "tileSetId":  "advanced",
+                                         "tileId":  1,
+                                         "attributes":  {
+
+                                                        }
+                                     }
+                                 ],
+                       "attributes":  {
+
+                                      }
+                   }
+               ]
+}

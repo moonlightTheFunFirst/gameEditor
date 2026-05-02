@@ -15,6 +15,7 @@ public sealed class MainForm : Form
 
     private readonly List<TileSet> tileSets = [];
     private TilePaletteControl? activePalette;
+    private string? currentMapPath;
 
     public MainForm()
     {
@@ -70,7 +71,8 @@ public sealed class MainForm : Form
         var fileMenu = new ToolStripMenuItem("ファイル");
         fileMenu.DropDownItems.Add("新規プロジェクト");
         fileMenu.DropDownItems.Add("開く");
-        fileMenu.DropDownItems.Add("保存");
+        fileMenu.DropDownItems.Add("保存", null, (_, _) => SaveMap());
+        fileMenu.DropDownItems.Add("名前を付けて保存", null, (_, _) => SaveMapAs());
         fileMenu.DropDownItems.Add(new ToolStripSeparator());
         fileMenu.DropDownItems.Add("終了", null, (_, _) => Close());
 
@@ -101,7 +103,7 @@ public sealed class MainForm : Form
 
         toolStrip.Items.Add(new ToolStripButton("新規"));
         toolStrip.Items.Add(new ToolStripButton("開く"));
-        toolStrip.Items.Add(new ToolStripButton("保存"));
+        toolStrip.Items.Add(new ToolStripButton("保存", null, (_, _) => SaveMap()));
         toolStrip.Items.Add(new ToolStripSeparator());
         toolStrip.Items.Add(new ToolStripButton("ペン"));
         toolStrip.Items.Add(new ToolStripButton("消しゴム"));
@@ -207,18 +209,25 @@ public sealed class MainForm : Form
         {
             tileSets.Clear();
 
+            const string baseImagePath = "resources/image/base_tiles.bmp";
+            const string advancedImagePath = "resources/image/advanced_tiles.bmp";
+
             tileSets.Add(TileSet.Load(
                 0,
+                "base",
                 "ベース",
                 TileSetKind.Base,
-                ResolveResourcePath("resources", "image", "base_tiles.bmp"),
+                ResolveResourcePath(baseImagePath),
+                baseImagePath,
                 InitialTileSize));
 
             tileSets.Add(TileSet.Load(
                 1,
+                "advanced",
                 "アドバンス",
                 TileSetKind.Advanced,
-                ResolveResourcePath("resources", "image", "advanced_tiles.bmp"),
+                ResolveResourcePath(advancedImagePath),
+                advancedImagePath,
                 InitialTileSize,
                 AdvancedTransparentColor));
 
@@ -272,9 +281,11 @@ public sealed class MainForm : Form
         if (tileSet is not null)
         {
             properties.Items.Add(new ListViewItem(new[] { "タイルセット", $"{tileSet.Name} {tileSet.Columns}x{tileSet.Rows}" }));
-            properties.Items.Add(new ListViewItem(new[] { "画像", Path.GetFileName(tileSet.SourcePath) }));
+            properties.Items.Add(new ListViewItem(new[] { "画像", tileSet.ImagePath }));
             properties.Items.Add(new ListViewItem(new[] { "透過色", tileSet.TransparentColor is null ? "なし" : "#FF00FF" }));
         }
+
+        properties.Items.Add(new ListViewItem(new[] { "保存先", currentMapPath is null ? "未保存" : Path.GetFileName(currentMapPath) }));
     }
 
     private void ConfigureTileSetTabs()
@@ -298,6 +309,59 @@ public sealed class MainForm : Form
     private static string GetKindName(TileSetKind kind)
     {
         return kind == TileSetKind.Base ? "ベース" : "アドバンス";
+    }
+
+    private void SaveMap()
+    {
+        if (currentMapPath is null)
+        {
+            SaveMapAs();
+            return;
+        }
+
+        SaveMapTo(currentMapPath);
+    }
+
+    private void SaveMapAs()
+    {
+        using var dialog = new SaveFileDialog
+        {
+            AddExtension = true,
+            DefaultExt = "gemap.json",
+            FileName = "untitled.gemap.json",
+            Filter = "gameEditor map (*.gemap.json)|*.gemap.json|JSON (*.json)|*.json|All files (*.*)|*.*",
+            Title = "マップを保存"
+        };
+
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        currentMapPath = dialog.FileName;
+        SaveMapTo(currentMapPath);
+    }
+
+    private void SaveMapTo(string path)
+    {
+        if (tileSets.Count == 0)
+        {
+            MessageBox.Show(this, "タイルセットが読み込まれていません。", "Save error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        try
+        {
+            var mapName = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(path));
+            MapSerializer.Save(path, mapDocument, tileSets, string.IsNullOrWhiteSpace(mapName) ? "Untitled" : mapName);
+            statusLabel.Text = $"保存しました: {Path.GetFileName(path)}";
+            RefreshProperties();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Save error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            statusLabel.Text = "Save failed";
+        }
     }
 
     private static string ResolveResourcePath(params string[] segments)
