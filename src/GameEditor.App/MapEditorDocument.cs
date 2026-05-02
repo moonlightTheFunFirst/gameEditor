@@ -28,6 +28,32 @@ public sealed class MapEditorDocument : IDisposable
 
     public bool IsDirty { get; set; }
 
+    public TileSet? GetTileSet(TileSetKind kind)
+    {
+        return TileSets.FirstOrDefault(tileSet => tileSet.Kind == kind);
+    }
+
+    public void ReplaceTileSet(TileSetKind kind, TileSet replacement)
+    {
+        for (var i = 0; i < TileSets.Count; i++)
+        {
+            if (TileSets[i].Kind != kind)
+            {
+                continue;
+            }
+
+            TileSets[i].Dispose();
+            TileSets[i] = replacement;
+            Viewport.TileSets = TileSets;
+            Viewport.Invalidate();
+            return;
+        }
+
+        TileSets.Add(replacement);
+        Viewport.TileSets = TileSets;
+        Viewport.Invalidate();
+    }
+
     public void Dispose()
     {
         foreach (var tileSet in TileSets)

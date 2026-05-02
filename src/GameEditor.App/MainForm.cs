@@ -3,13 +3,14 @@ namespace GameEditor;
 public sealed class MainForm : Form
 {
     private const int InitialTileSize = 32;
-    private static readonly Color AdvancedTransparentColor = Color.Magenta;
     private static readonly Color EmptyWorkspaceColor = Color.FromArgb(44, 46, 50);
 
     private readonly ToolStripStatusLabel statusLabel = new();
     private readonly DocumentTabControl mapTabs = new();
     private readonly Panel emptyMapPanel = new();
     private readonly TabControl tileSetTabs = new();
+    private readonly ComboBox baseTileSetSelector = new();
+    private readonly ComboBox advancedTileSetSelector = new();
     private readonly TilePaletteControl basePalette = new();
     private readonly TilePaletteControl advancedPalette = new();
     private readonly ListView properties = new();
@@ -25,6 +26,11 @@ public sealed class MainForm : Form
     private TilePaletteControl? activePalette;
     private MapEditTool currentEditTool = MapEditTool.Pen;
     private MapEditTool currentSecondaryEditTool = MapEditTool.Eraser;
+    private readonly List<TileSetDefinition> baseTileSetDefinitions = [];
+    private readonly List<TileSetDefinition> advancedTileSetDefinitions = [];
+    private TileSet? previewBaseTileSet;
+    private TileSet? previewAdvancedTileSet;
+    private bool updatingTileSetSelectors;
 
     public MainForm()
     {
@@ -32,6 +38,7 @@ public sealed class MainForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(1024, 640);
         ClientSize = new Size(1280, 800);
+        LoadTileSetDefinitions();
 
         var menu = BuildMenu();
         var toolStrip = BuildToolStrip();
@@ -48,8 +55,11 @@ public sealed class MainForm : Form
         advancedPalette.SelectedTileChanged += (_, _) => UpdateSelectedTile();
         tileSetTabs.SelectedIndexChanged += (_, _) => UpdateActivePalette();
         mapTabs.SelectedIndexChanged += (_, _) => ActivateCurrentDocument();
+        baseTileSetSelector.SelectedIndexChanged += (_, _) => ChangeActiveTileSet(TileSetKind.Base);
+        advancedTileSetSelector.SelectedIndexChanged += (_, _) => ChangeActiveTileSet(TileSetKind.Advanced);
 
         ConfigureEmptyMapPanel();
+        SetDefaultPaletteTileSets();
         SetEditTool(MapEditTool.Pen);
         UpdateMapWorkspaceState();
         UpdateDocumentActionsState();
@@ -64,6 +74,9 @@ public sealed class MainForm : Form
             {
                 document.Dispose();
             }
+
+            previewBaseTileSet?.Dispose();
+            previewAdvancedTileSet?.Dispose();
         }
 
         base.Dispose(disposing);
@@ -243,6 +256,16 @@ public sealed class MainForm : Form
         return panel;
     }
 
+    private void LoadTileSetDefinitions()
+    {
+        var definitions = TileSetCatalog.Load();
+        baseTileSetDefinitions.Clear();
+        advancedTileSetDefinitions.Clear();
+
+        baseTileSetDefinitions.AddRange(definitions.Where(definition => definition.Kind == TileSetKind.Base));
+        advancedTileSetDefinitions.AddRange(definitions.Where(definition => definition.Kind == TileSetKind.Advanced));
+    }
+
     private void ConfigureTileSetTabs()
     {
         if (tileSetTabs.TabPages.Count > 0)
@@ -254,11 +277,45 @@ public sealed class MainForm : Form
 
         var basePage = new TabPage("ベース");
         var advancedPage = new TabPage("アドバンス");
-        basePage.Controls.Add(basePalette);
-        advancedPage.Controls.Add(advancedPalette);
+        basePage.Controls.Add(BuildTileSetPage(baseTileSetSelector, basePalette, baseTileSetDefinitions));
+        advancedPage.Controls.Add(BuildTileSetPage(advancedTileSetSelector, advancedPalette, advancedTileSetDefinitions));
 
         tileSetTabs.TabPages.Add(basePage);
         tileSetTabs.TabPages.Add(advancedPage);
+    }
+
+    private static Control BuildTileSetPage(
+        ComboBox selector,
+        TilePaletteControl palette,
+        IReadOnlyList<TileSetDefinition> definitions)
+    {
+        var panel = new Panel
+        {
+            Dock = DockStyle.Fill
+        };
+
+        selector.Dock = DockStyle.Top;
+        selector.DropDownStyle = ComboBoxStyle.DropDownList;
+        selector.IntegralHeight = false;
+        selector.Height = 28;
+        selector.DisplayMember = nameof(TileSetDefinition.Name);
+        selector.ValueMember = nameof(TileSetDefinition.Id);
+        selector.Items.Clear();
+
+        foreach (var definition in definitions)
+        {
+            selector.Items.Add(definition);
+        }
+
+        if (selector.Items.Count > 0)
+        {
+            selector.SelectedIndex = 0;
+        }
+
+        palette.Dock = DockStyle.Fill;
+        panel.Controls.Add(palette);
+        panel.Controls.Add(selector);
+        return panel;
     }
 
     private void NewMap()
@@ -269,10 +326,21 @@ public sealed class MainForm : Form
             return;
         }
 
+        List<TileSet> tileSets;
+        try
+        {
+            tileSets = CreateActiveTileSets(dialog.TileSize);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Tileset load error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
         var document = new MapEditorDocument(
             dialog.MapName,
             new MapDocument(dialog.MapWidth, dialog.MapHeight, dialog.TileSize),
-            LoadDefaultTileSets(dialog.TileSize));
+            tileSets);
         AddDocumentTab(document);
         statusLabel.Text = $"新規マップ: {document.Name}";
     }
@@ -304,6 +372,7 @@ public sealed class MainForm : Form
             {
                 FilePath = path
             };
+            ApplyCatalogTileSets(document, markDirty: false);
 
             AddDocumentTab(document);
             statusLabel.Text = $"読み込みました: {Path.GetFileName(path)}";
@@ -357,9 +426,9 @@ public sealed class MainForm : Form
         var document = CurrentDocument;
         if (document is null)
         {
-            basePalette.TileSet = null;
-            advancedPalette.TileSet = null;
-            activePalette = null;
+            UpdateTileSetSelectorsForDocument(null);
+            SetDefaultPaletteTileSets();
+            activePalette = tileSetTabs.SelectedIndex == 1 ? advancedPalette : basePalette;
             Text = "gameEditor";
             UpdateMapWorkspaceState();
             UpdateDocumentActionsState();
@@ -367,8 +436,9 @@ public sealed class MainForm : Form
             return;
         }
 
-        basePalette.TileSet = document.TileSets.FirstOrDefault(tileSet => tileSet.Kind == TileSetKind.Base);
-        advancedPalette.TileSet = document.TileSets.FirstOrDefault(tileSet => tileSet.Kind == TileSetKind.Advanced);
+        UpdateTileSetSelectorsForDocument(document);
+        basePalette.TileSet = document.GetTileSet(TileSetKind.Base);
+        advancedPalette.TileSet = document.GetTileSet(TileSetKind.Advanced);
         activePalette = tileSetTabs.SelectedIndex == 1 ? advancedPalette : basePalette;
         document.Viewport.TileSets = document.TileSets;
         SyncCurrentViewportSelection();
@@ -408,6 +478,227 @@ public sealed class MainForm : Form
         viewport.SelectedTileId = activePalette.SelectedTileId;
         viewport.EditTool = currentEditTool;
         viewport.SecondaryEditTool = currentSecondaryEditTool;
+    }
+
+    private void ChangeActiveTileSet(TileSetKind kind)
+    {
+        if (updatingTileSetSelectors)
+        {
+            return;
+        }
+
+        var definition = GetSelectedTileSetDefinition(kind);
+        if (definition is null)
+        {
+            return;
+        }
+
+        var document = CurrentDocument;
+        if (document is null)
+        {
+            SetPreviewTileSet(kind, definition);
+            activePalette = tileSetTabs.SelectedIndex == 1 ? advancedPalette : basePalette;
+            UpdateSelectedTile();
+            return;
+        }
+
+        try
+        {
+            ReplaceDocumentTileSet(document, definition, markDirty: true);
+            SetDocumentPalette(kind, document.GetTileSet(kind));
+            SyncCurrentViewportSelection();
+            UpdateDocumentActionsState();
+            statusLabel.Text = $"Tileset: {definition.Name}";
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Tileset load error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private List<TileSet> CreateActiveTileSets(int tileSize)
+    {
+        var baseDefinition = GetSelectedTileSetDefinition(TileSetKind.Base)
+            ?? throw new InvalidOperationException("Base tileset is not loaded.");
+        var advancedDefinition = GetSelectedTileSetDefinition(TileSetKind.Advanced)
+            ?? throw new InvalidOperationException("Advanced tileset is not loaded.");
+
+        return
+        [
+            CreateTileSet(baseDefinition, GetTileSetIndex(TileSetKind.Base), tileSize),
+            CreateTileSet(advancedDefinition, GetTileSetIndex(TileSetKind.Advanced), tileSize)
+        ];
+    }
+
+    private void ApplyCatalogTileSets(MapEditorDocument document, bool markDirty)
+    {
+        foreach (var kind in new[] { TileSetKind.Base, TileSetKind.Advanced })
+        {
+            var current = document.GetTileSet(kind);
+            var definition = FindDefinitionForTileSet(current, kind);
+            if (definition is not null)
+            {
+                ReplaceDocumentTileSet(document, definition, markDirty);
+            }
+        }
+    }
+
+    private void ReplaceDocumentTileSet(MapEditorDocument document, TileSetDefinition definition, bool markDirty)
+    {
+        var replacement = CreateTileSet(definition, GetTileSetIndex(definition.Kind), document.Map.TileSize);
+        document.ReplaceTileSet(definition.Kind, replacement);
+
+        if (markDirty)
+        {
+            document.IsDirty = true;
+            UpdateDocumentTabTitle(document);
+        }
+    }
+
+    private void UpdateTileSetSelectorsForDocument(MapEditorDocument? document)
+    {
+        updatingTileSetSelectors = true;
+        try
+        {
+            SelectDefinition(baseTileSetSelector, document is null
+                ? GetSelectedTileSetDefinition(TileSetKind.Base)
+                : FindDefinitionForTileSet(document.GetTileSet(TileSetKind.Base), TileSetKind.Base),
+                fallbackToFirst: document is null);
+            SelectDefinition(advancedTileSetSelector, document is null
+                ? GetSelectedTileSetDefinition(TileSetKind.Advanced)
+                : FindDefinitionForTileSet(document.GetTileSet(TileSetKind.Advanced), TileSetKind.Advanced),
+                fallbackToFirst: document is null);
+        }
+        finally
+        {
+            updatingTileSetSelectors = false;
+        }
+    }
+
+    private static void SelectDefinition(ComboBox selector, TileSetDefinition? definition, bool fallbackToFirst)
+    {
+        if (definition is null)
+        {
+            selector.SelectedIndex = fallbackToFirst && selector.Items.Count > 0 ? 0 : -1;
+            return;
+        }
+
+        for (var i = 0; i < selector.Items.Count; i++)
+        {
+            if (selector.Items[i] is TileSetDefinition item && item.Id == definition.Id)
+            {
+                selector.SelectedIndex = i;
+                return;
+            }
+        }
+
+        selector.SelectedIndex = fallbackToFirst && selector.Items.Count > 0 ? 0 : -1;
+    }
+
+    private void SetDefaultPaletteTileSets()
+    {
+        var baseDefinition = GetSelectedTileSetDefinition(TileSetKind.Base);
+        var advancedDefinition = GetSelectedTileSetDefinition(TileSetKind.Advanced);
+
+        if (baseDefinition is not null)
+        {
+            SetPreviewTileSet(TileSetKind.Base, baseDefinition);
+        }
+        else
+        {
+            basePalette.TileSet = null;
+        }
+
+        if (advancedDefinition is not null)
+        {
+            SetPreviewTileSet(TileSetKind.Advanced, advancedDefinition);
+        }
+        else
+        {
+            advancedPalette.TileSet = null;
+        }
+
+        activePalette = tileSetTabs.SelectedIndex == 1 ? advancedPalette : basePalette;
+    }
+
+    private void SetPreviewTileSet(TileSetKind kind, TileSetDefinition definition)
+    {
+        var replacement = CreateTileSet(definition, GetTileSetIndex(kind), InitialTileSize);
+
+        if (kind == TileSetKind.Base)
+        {
+            previewBaseTileSet?.Dispose();
+            previewBaseTileSet = replacement;
+            basePalette.TileSet = previewBaseTileSet;
+        }
+        else
+        {
+            previewAdvancedTileSet?.Dispose();
+            previewAdvancedTileSet = replacement;
+            advancedPalette.TileSet = previewAdvancedTileSet;
+        }
+    }
+
+    private void SetDocumentPalette(TileSetKind kind, TileSet? tileSet)
+    {
+        if (kind == TileSetKind.Base)
+        {
+            basePalette.TileSet = tileSet;
+        }
+        else
+        {
+            advancedPalette.TileSet = tileSet;
+        }
+    }
+
+    private TileSetDefinition? GetSelectedTileSetDefinition(TileSetKind kind)
+    {
+        var selector = kind == TileSetKind.Base ? baseTileSetSelector : advancedTileSetSelector;
+        if (selector.SelectedItem is TileSetDefinition selected)
+        {
+            return selected;
+        }
+
+        return kind == TileSetKind.Base
+            ? baseTileSetDefinitions.FirstOrDefault()
+            : advancedTileSetDefinitions.FirstOrDefault();
+    }
+
+    private TileSetDefinition? FindDefinitionForTileSet(TileSet? tileSet, TileSetKind kind)
+    {
+        if (tileSet is null)
+        {
+            return null;
+        }
+
+        var definitions = kind == TileSetKind.Base ? baseTileSetDefinitions : advancedTileSetDefinitions;
+        return definitions.FirstOrDefault(definition =>
+            string.Equals(definition.ImagePath, tileSet.ImagePath, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(Path.GetFileName(definition.ImagePath), Path.GetFileName(tileSet.ImagePath), StringComparison.OrdinalIgnoreCase)
+            || string.Equals(Path.GetFullPath(definition.SourcePath), Path.GetFullPath(tileSet.SourcePath), StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static TileSet CreateTileSet(TileSetDefinition definition, int index, int tileSize)
+    {
+        return TileSet.Load(
+            index,
+            GetTileSetId(definition.Kind),
+            definition.Name,
+            definition.Kind,
+            definition.SourcePath,
+            definition.ImagePath,
+            tileSize,
+            definition.TransparentColor);
+    }
+
+    private static int GetTileSetIndex(TileSetKind kind)
+    {
+        return kind == TileSetKind.Base ? 0 : 1;
+    }
+
+    private static string GetTileSetId(TileSetKind kind)
+    {
+        return kind == TileSetKind.Base ? "base" : "advanced";
     }
 
     private void SaveMap()
@@ -671,33 +962,6 @@ public sealed class MainForm : Form
             MapEditTool.Select => "選択",
             _ => tool.ToString()
         };
-    }
-
-    private List<TileSet> LoadDefaultTileSets(int tileSize)
-    {
-        const string baseImagePath = "resources/image/base_tiles.bmp";
-        const string advancedImagePath = "resources/image/advanced_tiles.bmp";
-
-        return
-        [
-            TileSet.Load(
-                0,
-                "base",
-                "ベース",
-                TileSetKind.Base,
-                ResolveResourcePath(baseImagePath),
-                baseImagePath,
-                tileSize),
-            TileSet.Load(
-                1,
-                "advanced",
-                "アドバンス",
-                TileSetKind.Advanced,
-                ResolveResourcePath(advancedImagePath),
-                advancedImagePath,
-                tileSize,
-                AdvancedTransparentColor)
-        ];
     }
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
