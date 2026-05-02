@@ -3,14 +3,18 @@ namespace GameEditor;
 public sealed class MainForm : Form
 {
     private const int InitialTileSize = 32;
+    private static readonly Color AdvancedTransparentColor = Color.Magenta;
 
     private readonly ToolStripStatusLabel statusLabel = new();
     private readonly MapViewport mapViewport = new();
-    private readonly TilePaletteControl tilePalette = new();
+    private readonly TabControl tileSetTabs = new();
+    private readonly TilePaletteControl basePalette = new();
+    private readonly TilePaletteControl advancedPalette = new();
     private readonly MapDocument mapDocument = new(40, 30, InitialTileSize);
     private readonly ListView properties = new();
 
-    private TileSet? tileSet;
+    private readonly List<TileSet> tileSets = [];
+    private TilePaletteControl? activePalette;
 
     public MainForm()
     {
@@ -30,9 +34,17 @@ public sealed class MainForm : Form
         Controls.Add(menu);
 
         MainMenuStrip = menu;
-        tilePalette.SelectedTileChanged += (_, _) => UpdateSelectedTile();
-        mapViewport.TilePlaced += (_, point) => statusLabel.Text = $"配置: ({point.X}, {point.Y}) / Tile {mapViewport.SelectedTileId}";
-        Load += (_, _) => LoadSampleTileset();
+        basePalette.SelectedTileChanged += (_, _) => UpdateSelectedTile();
+        advancedPalette.SelectedTileChanged += (_, _) => UpdateSelectedTile();
+        tileSetTabs.SelectedIndexChanged += (_, _) => UpdateActivePalette();
+        mapViewport.TilePlaced += (_, point) =>
+        {
+            var tileSet = mapViewport.SelectedTileSet;
+            statusLabel.Text = tileSet is null
+                ? $"配置: ({point.X}, {point.Y})"
+                : $"配置: ({point.X}, {point.Y}) / {GetKindName(tileSet.Kind)} Tile {mapViewport.SelectedTileId}";
+        };
+        Load += (_, _) => LoadSampleTileSets();
 
         mapViewport.Document = mapDocument;
         statusLabel.Text = "Ready";
@@ -42,7 +54,10 @@ public sealed class MainForm : Form
     {
         if (disposing)
         {
-            tileSet?.Dispose();
+            foreach (var tileSet in tileSets)
+            {
+                tileSet.Dispose();
+            }
         }
 
         base.Dispose(disposing);
@@ -134,7 +149,8 @@ public sealed class MainForm : Form
             TextAlign = ContentAlignment.MiddleLeft
         };
 
-        panel.Controls.Add(tilePalette);
+        ConfigureTileSetTabs();
+        panel.Controls.Add(tileSetTabs);
         panel.Controls.Add(title);
 
         return panel;
@@ -185,17 +201,34 @@ public sealed class MainForm : Form
         return panel;
     }
 
-    private void LoadSampleTileset()
+    private void LoadSampleTileSets()
     {
         try
         {
-            var path = ResolveResourcePath("resources", "image", "sample.bmp");
-            tileSet = TileSet.Load(path, InitialTileSize);
-            tilePalette.TileSet = tileSet;
-            mapViewport.TileSet = tileSet;
-            UpdateSelectedTile();
+            tileSets.Clear();
+
+            tileSets.Add(TileSet.Load(
+                0,
+                "ベース",
+                TileSetKind.Base,
+                ResolveResourcePath("resources", "image", "base_tiles.bmp"),
+                InitialTileSize));
+
+            tileSets.Add(TileSet.Load(
+                1,
+                "アドバンス",
+                TileSetKind.Advanced,
+                ResolveResourcePath("resources", "image", "advanced_tiles.bmp"),
+                InitialTileSize,
+                AdvancedTransparentColor));
+
+            basePalette.TileSet = tileSets[0];
+            advancedPalette.TileSet = tileSets[1];
+            mapViewport.TileSets = tileSets;
+            activePalette = basePalette;
+            UpdateActivePalette();
             RefreshProperties();
-            statusLabel.Text = $"Tileset loaded: {tileSet.Columns}x{tileSet.Rows}, {tileSet.TileSize}px";
+            statusLabel.Text = "Tilesets loaded";
         }
         catch (Exception ex)
         {
@@ -206,29 +239,65 @@ public sealed class MainForm : Form
 
     private void UpdateSelectedTile()
     {
-        mapViewport.SelectedTileId = tilePalette.SelectedTileId;
+        if (activePalette?.TileSet is not { } tileSet)
+        {
+            return;
+        }
+
+        mapViewport.SelectedTileSet = tileSet;
+        mapViewport.SelectedTileId = activePalette.SelectedTileId;
         RefreshProperties();
 
-        if (tileSet is not null)
-        {
-            statusLabel.Text = $"選択中: Tile {tilePalette.SelectedTileId}";
-        }
+        statusLabel.Text = $"選択中: {GetKindName(tileSet.Kind)} Tile {activePalette.SelectedTileId}";
+    }
+
+    private void UpdateActivePalette()
+    {
+        activePalette = tileSetTabs.SelectedIndex == 1 ? advancedPalette : basePalette;
+        UpdateSelectedTile();
     }
 
     private void RefreshProperties()
     {
+        var tileSet = activePalette?.TileSet;
+        var selectedTileId = activePalette?.SelectedTileId ?? -1;
+
         properties.Items.Clear();
         properties.Items.Add(new ListViewItem(new[] { "エディタ", "マップ" }));
         properties.Items.Add(new ListViewItem(new[] { "マップサイズ", $"{mapDocument.Width}x{mapDocument.Height}" }));
         properties.Items.Add(new ListViewItem(new[] { "チップサイズ", $"{mapDocument.TileSize}x{mapDocument.TileSize}" }));
-        properties.Items.Add(new ListViewItem(new[] { "レイヤー", "1" }));
-        properties.Items.Add(new ListViewItem(new[] { "選択チップ", tilePalette.SelectedTileId.ToString() }));
+        properties.Items.Add(new ListViewItem(new[] { "編集レイヤー", tileSet is null ? "未読み込み" : GetKindName(tileSet.Kind) }));
+        properties.Items.Add(new ListViewItem(new[] { "選択チップ", selectedTileId.ToString() }));
 
         if (tileSet is not null)
         {
-            properties.Items.Add(new ListViewItem(new[] { "タイルセット", $"{tileSet.Columns}x{tileSet.Rows}" }));
+            properties.Items.Add(new ListViewItem(new[] { "タイルセット", $"{tileSet.Name} {tileSet.Columns}x{tileSet.Rows}" }));
             properties.Items.Add(new ListViewItem(new[] { "画像", Path.GetFileName(tileSet.SourcePath) }));
+            properties.Items.Add(new ListViewItem(new[] { "透過色", tileSet.TransparentColor is null ? "なし" : "#FF00FF" }));
         }
+    }
+
+    private void ConfigureTileSetTabs()
+    {
+        if (tileSetTabs.TabPages.Count > 0)
+        {
+            return;
+        }
+
+        tileSetTabs.Dock = DockStyle.Fill;
+
+        var basePage = new TabPage("ベース");
+        var advancedPage = new TabPage("アドバンス");
+        basePage.Controls.Add(basePalette);
+        advancedPage.Controls.Add(advancedPalette);
+
+        tileSetTabs.TabPages.Add(basePage);
+        tileSetTabs.TabPages.Add(advancedPage);
+    }
+
+    private static string GetKindName(TileSetKind kind)
+    {
+        return kind == TileSetKind.Base ? "ベース" : "アドバンス";
     }
 
     private static string ResolveResourcePath(params string[] segments)

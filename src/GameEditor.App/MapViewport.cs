@@ -3,7 +3,8 @@ namespace GameEditor;
 public sealed class MapViewport : ScrollableControl
 {
     private MapDocument? document;
-    private TileSet? tileSet;
+    private IReadOnlyList<TileSet> tileSets = Array.Empty<TileSet>();
+    private TileSet? selectedTileSet;
     private int selectedTileId;
 
     public MapViewport()
@@ -32,12 +33,24 @@ public sealed class MapViewport : ScrollableControl
 
     [System.ComponentModel.Browsable(false)]
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
-    public TileSet? TileSet
+    public IReadOnlyList<TileSet> TileSets
     {
-        get => tileSet;
+        get => tileSets;
         set
         {
-            tileSet = value;
+            tileSets = value;
+            Invalidate();
+        }
+    }
+
+    [System.ComponentModel.Browsable(false)]
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public TileSet? SelectedTileSet
+    {
+        get => selectedTileSet;
+        set
+        {
+            selectedTileSet = value;
             Invalidate();
         }
     }
@@ -77,7 +90,7 @@ public sealed class MapViewport : ScrollableControl
     {
         base.OnMouseDown(e);
 
-        if (document is null || tileSet is null || e.Button != MouseButtons.Left)
+        if (document is null || selectedTileSet is null || e.Button != MouseButtons.Left)
         {
             return;
         }
@@ -92,7 +105,7 @@ public sealed class MapViewport : ScrollableControl
             return;
         }
 
-        document.SetTile(tileX, tileY, selectedTileId);
+        document.SetTile(selectedTileSet.Kind, tileX, tileY, new TilePlacement(selectedTileSet.Index, selectedTileId));
         Invalidate(GetInvalidationRectangle(tileX, tileY));
         TilePlaced?.Invoke(this, new Point(tileX, tileY));
     }
@@ -104,7 +117,18 @@ public sealed class MapViewport : ScrollableControl
 
     private void DrawPlacedTiles(Graphics graphics)
     {
-        if (document is null || tileSet is null)
+        if (document is null)
+        {
+            return;
+        }
+
+        DrawLayer(graphics, TileSetKind.Base);
+        DrawLayer(graphics, TileSetKind.Advanced);
+    }
+
+    private void DrawLayer(Graphics graphics, TileSetKind kind)
+    {
+        if (document is null)
         {
             return;
         }
@@ -113,8 +137,14 @@ public sealed class MapViewport : ScrollableControl
         {
             for (var x = 0; x < document.Width; x++)
             {
-                var tileId = document.GetTile(x, y);
-                if (tileId < 0)
+                var placement = document.GetTile(kind, x, y);
+                if (placement.IsEmpty || placement.TileSetIndex < 0 || placement.TileSetIndex >= tileSets.Count)
+                {
+                    continue;
+                }
+
+                var tileSet = tileSets[placement.TileSetIndex];
+                if (tileSet.Kind != kind)
                 {
                     continue;
                 }
@@ -124,7 +154,7 @@ public sealed class MapViewport : ScrollableControl
                     y * document.TileSize,
                     document.TileSize,
                     document.TileSize);
-                tileSet.DrawTile(graphics, tileId, destination);
+                tileSet.DrawTile(graphics, placement.TileId, destination);
             }
         }
     }

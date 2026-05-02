@@ -11,8 +11,12 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Content Include="..\..\resources\image\sample.bmp">
-      <Link>resources\image\sample.bmp</Link>
+    <Content Include="..\..\resources\image\base_tiles.bmp">
+      <Link>resources\image\base_tiles.bmp</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\resources\image\advanced_tiles.bmp">
+      <Link>resources\image\advanced_tiles.bmp</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>

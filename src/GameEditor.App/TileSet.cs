@@ -2,14 +2,24 @@ namespace GameEditor;
 
 public sealed class TileSet : IDisposable
 {
-    private TileSet(Bitmap image, string sourcePath, int tileSize)
+    private TileSet(int index, string name, TileSetKind kind, Bitmap image, string sourcePath, int tileSize, Color? transparentColor)
     {
+        Index = index;
+        Name = name;
+        Kind = kind;
         Image = image;
         SourcePath = sourcePath;
         TileSize = tileSize;
+        TransparentColor = transparentColor;
         Columns = image.Width / tileSize;
         Rows = image.Height / tileSize;
     }
+
+    public int Index { get; }
+
+    public string Name { get; }
+
+    public TileSetKind Kind { get; }
 
     public Bitmap Image { get; }
 
@@ -17,13 +27,15 @@ public sealed class TileSet : IDisposable
 
     public int TileSize { get; }
 
+    public Color? TransparentColor { get; }
+
     public int Columns { get; }
 
     public int Rows { get; }
 
     public int TileCount => Columns * Rows;
 
-    public static TileSet Load(string path, int tileSize)
+    public static TileSet Load(int index, string name, TileSetKind kind, string path, int tileSize, Color? transparentColor = null)
     {
         if (tileSize <= 0)
         {
@@ -39,7 +51,7 @@ public sealed class TileSet : IDisposable
             throw new InvalidOperationException($"Tileset size must be divisible by {tileSize}. Actual: {source.Width}x{source.Height}");
         }
 
-        return new TileSet(image, path, tileSize);
+        return new TileSet(index, name, kind, image, path, tileSize, transparentColor);
     }
 
     public Rectangle GetSourceRectangle(int tileId)
@@ -61,7 +73,16 @@ public sealed class TileSet : IDisposable
             return;
         }
 
-        graphics.DrawImage(Image, destination, GetSourceRectangle(tileId), GraphicsUnit.Pixel);
+        var source = GetSourceRectangle(tileId);
+        if (TransparentColor is not { } colorKey)
+        {
+            graphics.DrawImage(Image, destination, source, GraphicsUnit.Pixel);
+            return;
+        }
+
+        using var attributes = new System.Drawing.Imaging.ImageAttributes();
+        attributes.SetColorKey(colorKey, colorKey);
+        graphics.DrawImage(Image, destination, source.X, source.Y, source.Width, source.Height, GraphicsUnit.Pixel, attributes);
     }
 
     public void Dispose()

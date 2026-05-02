@@ -12,7 +12,7 @@ public sealed class TilePaletteControl : ScrollableControl
         DoubleBuffered = true;
         ResizeRedraw = true;
         AutoScroll = true;
-        selectedTileId = 0;
+        selectedTileId = -1;
     }
 
     public event EventHandler? SelectedTileChanged;
@@ -25,7 +25,7 @@ public sealed class TilePaletteControl : ScrollableControl
         set
         {
             tileSet = value;
-            selectedTileId = 0;
+            selectedTileId = value is null ? -1 : 0;
             UpdateScrollSize();
             Invalidate();
             SelectedTileChanged?.Invoke(this, EventArgs.Empty);
@@ -117,6 +117,11 @@ public sealed class TilePaletteControl : ScrollableControl
     private void DrawSelection(Graphics graphics)
     {
         if (tileSet is null)
+        {
+            return;
+        }
+
+        if (selectedTileId < 0)
         {
             return;
         }

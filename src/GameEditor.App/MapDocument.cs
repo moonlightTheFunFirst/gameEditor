@@ -2,7 +2,8 @@ namespace GameEditor;
 
 public sealed class MapDocument
 {
-    private readonly int[,] tileIds;
+    private readonly TilePlacement[,] baseTiles;
+    private readonly TilePlacement[,] advancedTiles;
 
     public MapDocument(int width, int height, int tileSize)
     {
@@ -24,7 +25,8 @@ public sealed class MapDocument
         Width = width;
         Height = height;
         TileSize = tileSize;
-        tileIds = new int[width, height];
+        baseTiles = new TilePlacement[width, height];
+        advancedTiles = new TilePlacement[width, height];
 
         Clear();
     }
@@ -37,19 +39,24 @@ public sealed class MapDocument
 
     public Size PixelSize => new(Width * TileSize, Height * TileSize);
 
-    public int GetTile(int x, int y)
+    public TilePlacement GetTile(TileSetKind kind, int x, int y)
     {
-        return IsInside(x, y) ? tileIds[x, y] : -1;
+        if (!IsInside(x, y))
+        {
+            return TilePlacement.Empty;
+        }
+
+        return GetLayer(kind)[x, y];
     }
 
-    public void SetTile(int x, int y, int tileId)
+    public void SetTile(TileSetKind kind, int x, int y, TilePlacement placement)
     {
         if (!IsInside(x, y))
         {
             return;
         }
 
-        tileIds[x, y] = tileId;
+        GetLayer(kind)[x, y] = placement;
     }
 
     public bool IsInside(int x, int y)
@@ -63,8 +70,14 @@ public sealed class MapDocument
         {
             for (var x = 0; x < Width; x++)
             {
-                tileIds[x, y] = -1;
+                baseTiles[x, y] = TilePlacement.Empty;
+                advancedTiles[x, y] = TilePlacement.Empty;
             }
         }
+    }
+
+    private TilePlacement[,] GetLayer(TileSetKind kind)
+    {
+        return kind == TileSetKind.Base ? baseTiles : advancedTiles;
     }
 }
