@@ -4,9 +4,11 @@ public sealed class MainForm : Form
 {
     private const int InitialTileSize = 32;
     private static readonly Color AdvancedTransparentColor = Color.Magenta;
+    private static readonly Color EmptyWorkspaceColor = Color.FromArgb(44, 46, 50);
 
     private readonly ToolStripStatusLabel statusLabel = new();
-    private readonly MapViewport mapViewport = new();
+    private readonly DocumentTabControl mapTabs = new();
+    private readonly Panel emptyMapPanel = new();
     private readonly TabControl tileSetTabs = new();
     private readonly TilePaletteControl basePalette = new();
     private readonly TilePaletteControl advancedPalette = new();
@@ -19,12 +21,10 @@ public sealed class MainForm : Form
     private readonly ToolStripButton redoButton = new("やり直し");
     private readonly ToolStripMenuItem undoMenuItem = new("元に戻す");
     private readonly ToolStripMenuItem redoMenuItem = new("やり直し");
-    private readonly MapEditHistory editHistory = new();
 
-    private readonly List<TileSet> tileSets = [];
-    private MapDocument mapDocument = new(40, 30, InitialTileSize);
     private TilePaletteControl? activePalette;
-    private string? currentMapPath;
+    private MapEditTool currentEditTool = MapEditTool.Pen;
+    private MapEditTool currentSecondaryEditTool = MapEditTool.Eraser;
 
     public MainForm()
     {
@@ -47,22 +47,12 @@ public sealed class MainForm : Form
         basePalette.SelectedTileChanged += (_, _) => UpdateSelectedTile();
         advancedPalette.SelectedTileChanged += (_, _) => UpdateSelectedTile();
         tileSetTabs.SelectedIndexChanged += (_, _) => UpdateActivePalette();
-        mapViewport.EditApplied += (_, args) =>
-        {
-            var layer = args.LayerKind is null ? "" : $" / {GetKindName(args.LayerKind.Value)}";
-            statusLabel.Text = $"{GetToolName(args.Tool)}: ({args.Cell.X}, {args.Cell.Y}){layer} / {args.AffectedTiles} tiles";
-        };
-        mapViewport.EditCommandCommitted += (_, command) =>
-        {
-            editHistory.Push(command);
-            UpdateUndoRedoState();
-        };
-        Load += (_, _) => LoadSampleTileSets();
+        mapTabs.SelectedIndexChanged += (_, _) => ActivateCurrentDocument();
 
-        mapViewport.Document = mapDocument;
-        mapViewport.SecondaryEditTool = MapEditTool.Eraser;
+        ConfigureEmptyMapPanel();
         SetEditTool(MapEditTool.Pen);
-        UpdateUndoRedoState();
+        UpdateMapWorkspaceState();
+        UpdateDocumentActionsState();
         statusLabel.Text = "Ready";
     }
 
@@ -70,9 +60,9 @@ public sealed class MainForm : Form
     {
         if (disposing)
         {
-            foreach (var tileSet in tileSets)
+            foreach (var document in EnumerateDocuments())
             {
-                tileSet.Dispose();
+                document.Dispose();
             }
         }
 
@@ -84,18 +74,12 @@ public sealed class MainForm : Form
         var menu = new MenuStrip();
 
         var fileMenu = new ToolStripMenuItem("ファイル");
-        fileMenu.DropDownItems.Add("新規プロジェクト");
+        fileMenu.DropDownItems.Add("新規マップ", null, (_, _) => NewMap());
         fileMenu.DropDownItems.Add("開く", null, (_, _) => OpenMap());
         fileMenu.DropDownItems.Add("保存", null, (_, _) => SaveMap());
         fileMenu.DropDownItems.Add("名前を付けて保存", null, (_, _) => SaveMapAs());
         fileMenu.DropDownItems.Add(new ToolStripSeparator());
         fileMenu.DropDownItems.Add("終了", null, (_, _) => Close());
-
-        var editorMenu = new ToolStripMenuItem("エディタ");
-        editorMenu.DropDownItems.Add("マップエディター");
-        editorMenu.DropDownItems.Add("アニメーションエディター");
-        editorMenu.DropDownItems.Add("エフェクトエディター");
-        editorMenu.DropDownItems.Add("コリジョンエディター");
 
         undoMenuItem.ShortcutKeys = Keys.Control | Keys.Z;
         undoMenuItem.Click += (_, _) => UndoMapEdit();
@@ -105,6 +89,12 @@ public sealed class MainForm : Form
         var editMenu = new ToolStripMenuItem("編集");
         editMenu.DropDownItems.Add(undoMenuItem);
         editMenu.DropDownItems.Add(redoMenuItem);
+
+        var editorMenu = new ToolStripMenuItem("エディタ");
+        editorMenu.DropDownItems.Add("マップエディター");
+        editorMenu.DropDownItems.Add("アニメーションエディター");
+        editorMenu.DropDownItems.Add("エフェクトエディター");
+        editorMenu.DropDownItems.Add("コリジョンエディター");
 
         var viewMenu = new ToolStripMenuItem("表示");
         viewMenu.DropDownItems.Add("グリッド");
@@ -126,15 +116,17 @@ public sealed class MainForm : Form
             Dock = DockStyle.Top
         };
 
-        toolStrip.Items.Add(new ToolStripButton("新規"));
+        toolStrip.Items.Add(new ToolStripButton("新規", null, (_, _) => NewMap()));
         toolStrip.Items.Add(new ToolStripButton("開く", null, (_, _) => OpenMap()));
         toolStrip.Items.Add(new ToolStripButton("保存", null, (_, _) => SaveMap()));
         toolStrip.Items.Add(new ToolStripSeparator());
+
         undoButton.Click += (_, _) => UndoMapEdit();
         redoButton.Click += (_, _) => RedoMapEdit();
         toolStrip.Items.Add(undoButton);
         toolStrip.Items.Add(redoButton);
         toolStrip.Items.Add(new ToolStripSeparator());
+
         toolStrip.Items.Add(ConfigureToolButton(penToolButton, MapEditTool.Pen));
         toolStrip.Items.Add(ConfigureToolButton(fillToolButton, MapEditTool.Fill));
         toolStrip.Items.Add(ConfigureToolButton(eraserToolButton, MapEditTool.Eraser));
@@ -194,12 +186,29 @@ public sealed class MainForm : Form
         var split = new SplitContainer
         {
             Dock = DockStyle.Fill,
+            BackColor = SystemColors.Control,
             FixedPanel = FixedPanel.Panel2,
             SplitterWidth = 6,
             SplitterDistance = 760
         };
+        split.Panel1.BackColor = SystemColors.Control;
+        split.Panel2.BackColor = SystemColors.Control;
 
-        split.Panel1.Controls.Add(mapViewport);
+        var mapHost = new Panel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = SystemColors.Control
+        };
+
+        mapTabs.Dock = DockStyle.Fill;
+        mapTabs.HeaderBackColor = SystemColors.Control;
+        mapTabs.PageBackColor = SystemColors.Control;
+        mapTabs.Visible = false;
+        emptyMapPanel.Dock = DockStyle.Fill;
+        emptyMapPanel.Visible = true;
+        mapHost.Controls.Add(mapTabs);
+        mapHost.Controls.Add(emptyMapPanel);
+        split.Panel1.Controls.Add(mapHost);
         split.Panel2.Controls.Add(BuildPropertyPanel());
 
         return split;
@@ -234,90 +243,6 @@ public sealed class MainForm : Form
         return panel;
     }
 
-    private void LoadSampleTileSets()
-    {
-        try
-        {
-            const string baseImagePath = "resources/image/base_tiles.bmp";
-            const string advancedImagePath = "resources/image/advanced_tiles.bmp";
-
-            ReplaceTileSets(
-            [
-                TileSet.Load(
-                    0,
-                    "base",
-                    "ベース",
-                    TileSetKind.Base,
-                    ResolveResourcePath(baseImagePath),
-                    baseImagePath,
-                    InitialTileSize),
-                TileSet.Load(
-                    1,
-                    "advanced",
-                    "アドバンス",
-                    TileSetKind.Advanced,
-                    ResolveResourcePath(advancedImagePath),
-                    advancedImagePath,
-                    InitialTileSize,
-                    AdvancedTransparentColor)
-            ]);
-
-            RefreshProperties();
-            statusLabel.Text = "Tilesets loaded";
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, ex.Message, "Tileset load error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            statusLabel.Text = "Tileset load failed";
-        }
-    }
-
-    private void UpdateSelectedTile()
-    {
-        if (activePalette?.TileSet is not { } tileSet)
-        {
-            return;
-        }
-
-        mapViewport.SelectedTileSet = tileSet;
-        mapViewport.SelectedTileId = activePalette.SelectedTileId;
-        RefreshProperties();
-
-        statusLabel.Text = $"選択中: {GetKindName(tileSet.Kind)} Tile {activePalette.SelectedTileId}";
-    }
-
-    private void UpdateActivePalette()
-    {
-        activePalette = tileSetTabs.SelectedIndex == 1 ? advancedPalette : basePalette;
-        UpdateSelectedTile();
-    }
-
-    private void RefreshProperties()
-    {
-        var tileSet = activePalette?.TileSet;
-        var selectedTileId = activePalette?.SelectedTileId ?? -1;
-
-        properties.Items.Clear();
-        properties.Items.Add(new ListViewItem(new[] { "エディタ", "マップ" }));
-        properties.Items.Add(new ListViewItem(new[] { "マップサイズ", $"{mapDocument.Width}x{mapDocument.Height}" }));
-        properties.Items.Add(new ListViewItem(new[] { "チップサイズ", $"{mapDocument.TileSize}x{mapDocument.TileSize}" }));
-        properties.Items.Add(new ListViewItem(new[] { "編集レイヤー", tileSet is null ? "未読み込み" : GetKindName(tileSet.Kind) }));
-        properties.Items.Add(new ListViewItem(new[] { "左クリック", GetToolName(mapViewport.EditTool) }));
-        properties.Items.Add(new ListViewItem(new[] { "右クリック", GetToolName(mapViewport.SecondaryEditTool) }));
-        properties.Items.Add(new ListViewItem(new[] { "Undo", editHistory.CanUndo ? "可" : "不可" }));
-        properties.Items.Add(new ListViewItem(new[] { "Redo", editHistory.CanRedo ? "可" : "不可" }));
-        properties.Items.Add(new ListViewItem(new[] { "選択チップ", selectedTileId.ToString() }));
-
-        if (tileSet is not null)
-        {
-            properties.Items.Add(new ListViewItem(new[] { "タイルセット", $"{tileSet.Name} {tileSet.Columns}x{tileSet.Rows}" }));
-            properties.Items.Add(new ListViewItem(new[] { "画像", tileSet.ImagePath }));
-            properties.Items.Add(new ListViewItem(new[] { "透過色", tileSet.TransparentColor is null ? "なし" : "#FF00FF" }));
-        }
-
-        properties.Items.Add(new ListViewItem(new[] { "保存先", currentMapPath is null ? "未保存" : Path.GetFileName(currentMapPath) }));
-    }
-
     private void ConfigureTileSetTabs()
     {
         if (tileSetTabs.TabPages.Count > 0)
@@ -336,134 +261,20 @@ public sealed class MainForm : Form
         tileSetTabs.TabPages.Add(advancedPage);
     }
 
-    private static string GetKindName(TileSetKind kind)
+    private void NewMap()
     {
-        return kind == TileSetKind.Base ? "ベース" : "アドバンス";
-    }
-
-    private static string GetToolName(MapEditTool tool)
-    {
-        return tool switch
-        {
-            MapEditTool.Pen => "ペン",
-            MapEditTool.Fill => "塗りつぶし",
-            MapEditTool.Eraser => "消しゴム",
-            MapEditTool.Select => "選択",
-            _ => tool.ToString()
-        };
-    }
-
-    private ToolStripButton ConfigureToolButton(ToolStripButton button, MapEditTool tool)
-    {
-        button.CheckOnClick = false;
-        button.Click += (_, _) => SetEditTool(tool);
-        return button;
-    }
-
-    private void SetEditTool(MapEditTool tool)
-    {
-        mapViewport.EditTool = tool;
-        UpdateToolButtonChecks();
-        RefreshProperties();
-        statusLabel.Text = $"ツール: {GetToolName(tool)}";
-    }
-
-    private void UpdateToolButtonChecks()
-    {
-        penToolButton.Checked = mapViewport.EditTool == MapEditTool.Pen;
-        fillToolButton.Checked = mapViewport.EditTool == MapEditTool.Fill;
-        eraserToolButton.Checked = mapViewport.EditTool == MapEditTool.Eraser;
-        selectToolButton.Checked = mapViewport.EditTool == MapEditTool.Select;
-    }
-
-    private void UndoMapEdit()
-    {
-        var command = editHistory.Undo(mapDocument);
-        if (command is null)
-        {
-            statusLabel.Text = "Undo できません";
-            return;
-        }
-
-        mapViewport.Invalidate();
-        UpdateUndoRedoState();
-        statusLabel.Text = $"Undo: {command.Name}";
-    }
-
-    private void RedoMapEdit()
-    {
-        var command = editHistory.Redo(mapDocument);
-        if (command is null)
-        {
-            statusLabel.Text = "Redo できません";
-            return;
-        }
-
-        mapViewport.Invalidate();
-        UpdateUndoRedoState();
-        statusLabel.Text = $"Redo: {command.Name}";
-    }
-
-    private void UpdateUndoRedoState()
-    {
-        undoButton.Enabled = editHistory.CanUndo;
-        redoButton.Enabled = editHistory.CanRedo;
-        undoMenuItem.Enabled = editHistory.CanUndo;
-        redoMenuItem.Enabled = editHistory.CanRedo;
-        RefreshProperties();
-    }
-
-    private void SaveMap()
-    {
-        if (currentMapPath is null)
-        {
-            SaveMapAs();
-            return;
-        }
-
-        SaveMapTo(currentMapPath);
-    }
-
-    private void SaveMapAs()
-    {
-        using var dialog = new SaveFileDialog
-        {
-            AddExtension = true,
-            DefaultExt = "gemap.json",
-            FileName = "untitled.gemap.json",
-            Filter = "gameEditor map (*.gemap.json)|*.gemap.json|JSON (*.json)|*.json|All files (*.*)|*.*",
-            Title = "マップを保存"
-        };
-
+        using var dialog = new NewMapDialog();
         if (dialog.ShowDialog(this) != DialogResult.OK)
         {
             return;
         }
 
-        currentMapPath = dialog.FileName;
-        SaveMapTo(currentMapPath);
-    }
-
-    private void SaveMapTo(string path)
-    {
-        if (tileSets.Count == 0)
-        {
-            MessageBox.Show(this, "タイルセットが読み込まれていません。", "Save error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
-        }
-
-        try
-        {
-            var mapName = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(path));
-            MapSerializer.Save(path, mapDocument, tileSets, string.IsNullOrWhiteSpace(mapName) ? "Untitled" : mapName);
-            statusLabel.Text = $"保存しました: {Path.GetFileName(path)}";
-            RefreshProperties();
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, ex.Message, "Save error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            statusLabel.Text = "Save failed";
-        }
+        var document = new MapEditorDocument(
+            dialog.MapName,
+            new MapDocument(dialog.MapWidth, dialog.MapHeight, dialog.TileSize),
+            LoadDefaultTileSets(dialog.TileSize));
+        AddDocumentTab(document);
+        statusLabel.Text = $"新規マップ: {document.Name}";
     }
 
     private void OpenMap()
@@ -489,17 +300,13 @@ public sealed class MainForm : Form
         try
         {
             var loaded = MapSerializer.Load(path);
+            var document = new MapEditorDocument(loaded.MapName, loaded.Document, loaded.TileSets)
+            {
+                FilePath = path
+            };
 
-            mapDocument = loaded.Document;
-            mapViewport.Document = mapDocument;
-            ReplaceTileSets(loaded.TileSets);
-            editHistory.Clear();
-            UpdateUndoRedoState();
-
-            currentMapPath = path;
-            Text = $"gameEditor - {loaded.MapName}";
+            AddDocumentTab(document);
             statusLabel.Text = $"読み込みました: {Path.GetFileName(path)}";
-            RefreshProperties();
         }
         catch (Exception ex)
         {
@@ -508,23 +315,389 @@ public sealed class MainForm : Form
         }
     }
 
-    private void ReplaceTileSets(IEnumerable<TileSet> newTileSets)
+    private void AddDocumentTab(MapEditorDocument document)
     {
-        foreach (var tileSet in tileSets)
+        ConfigureViewport(document);
+
+        var page = new TabPage
         {
-            tileSet.Dispose();
+            Text = document.Name,
+            Tag = document,
+            BackColor = SystemColors.Control,
+            Padding = Padding.Empty,
+            UseVisualStyleBackColor = false
+        };
+        page.Controls.Add(document.Viewport);
+        mapTabs.TabPages.Add(page);
+        mapTabs.SelectedTab = page;
+        UpdateMapWorkspaceState();
+        ActivateCurrentDocument();
+    }
+
+    private void ConfigureViewport(MapEditorDocument document)
+    {
+        document.Viewport.EditTool = currentEditTool;
+        document.Viewport.SecondaryEditTool = currentSecondaryEditTool;
+        document.Viewport.EditApplied += (_, args) =>
+        {
+            var layer = args.LayerKind is null ? "" : $" / {GetKindName(args.LayerKind.Value)}";
+            statusLabel.Text = $"{GetToolName(args.Tool)}: ({args.Cell.X}, {args.Cell.Y}){layer} / {args.AffectedTiles} tiles";
+        };
+        document.Viewport.EditCommandCommitted += (_, command) =>
+        {
+            document.History.Push(command);
+            document.IsDirty = true;
+            UpdateDocumentTabTitle(document);
+            UpdateDocumentActionsState();
+        };
+    }
+
+    private void ActivateCurrentDocument()
+    {
+        var document = CurrentDocument;
+        if (document is null)
+        {
+            basePalette.TileSet = null;
+            advancedPalette.TileSet = null;
+            activePalette = null;
+            Text = "gameEditor";
+            UpdateMapWorkspaceState();
+            UpdateDocumentActionsState();
+            RefreshProperties();
+            return;
         }
 
-        tileSets.Clear();
-        tileSets.AddRange(newTileSets);
-
-        basePalette.TileSet = tileSets.FirstOrDefault(tileSet => tileSet.Kind == TileSetKind.Base);
-        advancedPalette.TileSet = tileSets.FirstOrDefault(tileSet => tileSet.Kind == TileSetKind.Advanced);
-        mapViewport.TileSets = tileSets;
+        basePalette.TileSet = document.TileSets.FirstOrDefault(tileSet => tileSet.Kind == TileSetKind.Base);
+        advancedPalette.TileSet = document.TileSets.FirstOrDefault(tileSet => tileSet.Kind == TileSetKind.Advanced);
         activePalette = tileSetTabs.SelectedIndex == 1 ? advancedPalette : basePalette;
-        UpdateActivePalette();
-        editHistory.Clear();
-        UpdateUndoRedoState();
+        document.Viewport.TileSets = document.TileSets;
+        SyncCurrentViewportSelection();
+        Text = $"gameEditor - {document.Name}";
+        UpdateMapWorkspaceState();
+        UpdateDocumentActionsState();
+        RefreshProperties();
+    }
+
+    private void UpdateActivePalette()
+    {
+        activePalette = tileSetTabs.SelectedIndex == 1 ? advancedPalette : basePalette;
+        UpdateSelectedTile();
+    }
+
+    private void UpdateSelectedTile()
+    {
+        SyncCurrentViewportSelection();
+
+        if (activePalette?.TileSet is { } tileSet)
+        {
+            statusLabel.Text = $"選択中: {GetKindName(tileSet.Kind)} Tile {activePalette.SelectedTileId}";
+        }
+
+        RefreshProperties();
+    }
+
+    private void SyncCurrentViewportSelection()
+    {
+        var viewport = CurrentDocument?.Viewport;
+        if (viewport is null || activePalette?.TileSet is not { } tileSet)
+        {
+            return;
+        }
+
+        viewport.SelectedTileSet = tileSet;
+        viewport.SelectedTileId = activePalette.SelectedTileId;
+        viewport.EditTool = currentEditTool;
+        viewport.SecondaryEditTool = currentSecondaryEditTool;
+    }
+
+    private void SaveMap()
+    {
+        var document = CurrentDocument;
+        if (document is null)
+        {
+            statusLabel.Text = "保存するマップがありません";
+            return;
+        }
+
+        if (document.FilePath is null)
+        {
+            SaveMapAs();
+            return;
+        }
+
+        SaveMapTo(document, document.FilePath);
+    }
+
+    private void SaveMapAs()
+    {
+        var document = CurrentDocument;
+        if (document is null)
+        {
+            statusLabel.Text = "保存するマップがありません";
+            return;
+        }
+
+        using var dialog = new SaveFileDialog
+        {
+            AddExtension = true,
+            DefaultExt = "gemap.json",
+            FileName = $"{document.Name}.gemap.json",
+            Filter = "gameEditor map (*.gemap.json)|*.gemap.json|JSON (*.json)|*.json|All files (*.*)|*.*",
+            Title = "マップを保存"
+        };
+
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        document.FilePath = dialog.FileName;
+        SaveMapTo(document, document.FilePath);
+    }
+
+    private void SaveMapTo(MapEditorDocument document, string path)
+    {
+        try
+        {
+            MapSerializer.Save(path, document.Map, document.TileSets, document.Name);
+            document.IsDirty = false;
+            UpdateDocumentTabTitle(document);
+            statusLabel.Text = $"保存しました: {Path.GetFileName(path)}";
+            RefreshProperties();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Save error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            statusLabel.Text = "Save failed";
+        }
+    }
+
+    private void UndoMapEdit()
+    {
+        var document = CurrentDocument;
+        if (document is null)
+        {
+            statusLabel.Text = "Undo できません";
+            return;
+        }
+
+        var command = document.History.Undo(document.Map);
+        if (command is null)
+        {
+            statusLabel.Text = "Undo できません";
+            return;
+        }
+
+        document.IsDirty = true;
+        document.Viewport.Invalidate();
+        UpdateDocumentTabTitle(document);
+        UpdateDocumentActionsState();
+        statusLabel.Text = $"Undo: {command.Name}";
+    }
+
+    private void RedoMapEdit()
+    {
+        var document = CurrentDocument;
+        if (document is null)
+        {
+            statusLabel.Text = "Redo できません";
+            return;
+        }
+
+        var command = document.History.Redo(document.Map);
+        if (command is null)
+        {
+            statusLabel.Text = "Redo できません";
+            return;
+        }
+
+        document.IsDirty = true;
+        document.Viewport.Invalidate();
+        UpdateDocumentTabTitle(document);
+        UpdateDocumentActionsState();
+        statusLabel.Text = $"Redo: {command.Name}";
+    }
+
+    private void SetEditTool(MapEditTool tool)
+    {
+        currentEditTool = tool;
+
+        foreach (var document in EnumerateDocuments())
+        {
+            document.Viewport.EditTool = currentEditTool;
+        }
+
+        UpdateToolButtonChecks();
+        RefreshProperties();
+        statusLabel.Text = $"ツール: {GetToolName(tool)}";
+    }
+
+    private void UpdateToolButtonChecks()
+    {
+        penToolButton.Checked = currentEditTool == MapEditTool.Pen;
+        fillToolButton.Checked = currentEditTool == MapEditTool.Fill;
+        eraserToolButton.Checked = currentEditTool == MapEditTool.Eraser;
+        selectToolButton.Checked = currentEditTool == MapEditTool.Select;
+    }
+
+    private ToolStripButton ConfigureToolButton(ToolStripButton button, MapEditTool tool)
+    {
+        button.CheckOnClick = false;
+        button.Click += (_, _) => SetEditTool(tool);
+        return button;
+    }
+
+    private void UpdateDocumentActionsState()
+    {
+        var document = CurrentDocument;
+        var hasDocument = document is not null;
+        undoButton.Enabled = document?.History.CanUndo == true;
+        redoButton.Enabled = document?.History.CanRedo == true;
+        undoMenuItem.Enabled = undoButton.Enabled;
+        redoMenuItem.Enabled = redoButton.Enabled;
+        penToolButton.Enabled = hasDocument;
+        fillToolButton.Enabled = hasDocument;
+        eraserToolButton.Enabled = hasDocument;
+        selectToolButton.Enabled = hasDocument;
+        RefreshProperties();
+    }
+
+    private void RefreshProperties()
+    {
+        var document = CurrentDocument;
+        var tileSet = activePalette?.TileSet;
+        var selectedTileId = activePalette?.SelectedTileId ?? -1;
+
+        properties.Items.Clear();
+        properties.Items.Add(new ListViewItem(new[] { "エディタ", "マップ" }));
+
+        if (document is null)
+        {
+            properties.Items.Add(new ListViewItem(new[] { "マップ", "未選択" }));
+            properties.Items.Add(new ListViewItem(new[] { "左クリック", GetToolName(currentEditTool) }));
+            properties.Items.Add(new ListViewItem(new[] { "右クリック", GetToolName(currentSecondaryEditTool) }));
+            return;
+        }
+
+        properties.Items.Add(new ListViewItem(new[] { "マップ名", document.Name }));
+        properties.Items.Add(new ListViewItem(new[] { "マップサイズ", $"{document.Map.Width}x{document.Map.Height}" }));
+        properties.Items.Add(new ListViewItem(new[] { "チップサイズ", $"{document.Map.TileSize}x{document.Map.TileSize}" }));
+        properties.Items.Add(new ListViewItem(new[] { "編集レイヤー", tileSet is null ? "未読み込み" : GetKindName(tileSet.Kind) }));
+        properties.Items.Add(new ListViewItem(new[] { "左クリック", GetToolName(currentEditTool) }));
+        properties.Items.Add(new ListViewItem(new[] { "右クリック", GetToolName(currentSecondaryEditTool) }));
+        properties.Items.Add(new ListViewItem(new[] { "Undo", document.History.CanUndo ? "可" : "不可" }));
+        properties.Items.Add(new ListViewItem(new[] { "Redo", document.History.CanRedo ? "可" : "不可" }));
+        properties.Items.Add(new ListViewItem(new[] { "選択チップ", selectedTileId.ToString() }));
+
+        if (tileSet is not null)
+        {
+            properties.Items.Add(new ListViewItem(new[] { "タイルセット", $"{tileSet.Name} {tileSet.Columns}x{tileSet.Rows}" }));
+            properties.Items.Add(new ListViewItem(new[] { "画像", tileSet.ImagePath }));
+            properties.Items.Add(new ListViewItem(new[] { "透過色", tileSet.TransparentColor is null ? "なし" : "#FF00FF" }));
+        }
+
+        properties.Items.Add(new ListViewItem(new[] { "保存先", document.FilePath is null ? "未保存" : Path.GetFileName(document.FilePath) }));
+    }
+
+    private void UpdateDocumentTabTitle(MapEditorDocument document)
+    {
+        foreach (TabPage page in mapTabs.TabPages)
+        {
+            if (ReferenceEquals(page.Tag, document))
+            {
+                page.Text = document.IsDirty ? $"{document.Name}*" : document.Name;
+                return;
+            }
+        }
+    }
+
+    private IEnumerable<MapEditorDocument> EnumerateDocuments()
+    {
+        foreach (TabPage page in mapTabs.TabPages)
+        {
+            if (page.Tag is MapEditorDocument document)
+            {
+                yield return document;
+            }
+        }
+    }
+
+    private MapEditorDocument? CurrentDocument => mapTabs.SelectedTab?.Tag as MapEditorDocument;
+
+    private void ConfigureEmptyMapPanel()
+    {
+        emptyMapPanel.BackColor = EmptyWorkspaceColor;
+
+        var message = new Label
+        {
+            AutoSize = false,
+            Dock = DockStyle.Fill,
+            Text = "マップがありません",
+            TextAlign = ContentAlignment.MiddleCenter,
+            ForeColor = Color.FromArgb(168, 174, 184),
+            BackColor = EmptyWorkspaceColor
+        };
+
+        emptyMapPanel.Controls.Add(message);
+    }
+
+    private void UpdateMapWorkspaceState()
+    {
+        var hasDocument = mapTabs.TabPages.Count > 0;
+        mapTabs.Visible = hasDocument;
+        emptyMapPanel.Visible = !hasDocument;
+        if (hasDocument)
+        {
+            mapTabs.BringToFront();
+        }
+        else
+        {
+            emptyMapPanel.BringToFront();
+        }
+    }
+
+    private static string GetKindName(TileSetKind kind)
+    {
+        return kind == TileSetKind.Base ? "ベース" : "アドバンス";
+    }
+
+    private static string GetToolName(MapEditTool tool)
+    {
+        return tool switch
+        {
+            MapEditTool.Pen => "ペン",
+            MapEditTool.Fill => "塗りつぶし",
+            MapEditTool.Eraser => "消しゴム",
+            MapEditTool.Select => "選択",
+            _ => tool.ToString()
+        };
+    }
+
+    private List<TileSet> LoadDefaultTileSets(int tileSize)
+    {
+        const string baseImagePath = "resources/image/base_tiles.bmp";
+        const string advancedImagePath = "resources/image/advanced_tiles.bmp";
+
+        return
+        [
+            TileSet.Load(
+                0,
+                "base",
+                "ベース",
+                TileSetKind.Base,
+                ResolveResourcePath(baseImagePath),
+                baseImagePath,
+                tileSize),
+            TileSet.Load(
+                1,
+                "advanced",
+                "アドバンス",
+                TileSetKind.Advanced,
+                ResolveResourcePath(advancedImagePath),
+                advancedImagePath,
+                tileSize,
+                AdvancedTransparentColor)
+        ];
     }
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
