@@ -76,6 +76,57 @@ public sealed class MapDocument
         GetLayer(kind)[x, y] = placement;
     }
 
+    public int FloodFill(TileSetKind kind, int x, int y, TilePlacement replacement)
+    {
+        if (!IsInside(x, y))
+        {
+            return 0;
+        }
+
+        var layer = GetLayer(kind);
+        var target = layer[x, y];
+        if (target == replacement)
+        {
+            return 0;
+        }
+
+        var filled = 0;
+        var visited = new bool[Width, Height];
+        var queue = new Queue<Point>();
+        queue.Enqueue(new Point(x, y));
+        visited[x, y] = true;
+
+        while (queue.Count > 0)
+        {
+            var point = queue.Dequeue();
+            if (layer[point.X, point.Y] != target)
+            {
+                continue;
+            }
+
+            layer[point.X, point.Y] = replacement;
+            filled++;
+
+            EnqueueIfNeeded(point.X - 1, point.Y);
+            EnqueueIfNeeded(point.X + 1, point.Y);
+            EnqueueIfNeeded(point.X, point.Y - 1);
+            EnqueueIfNeeded(point.X, point.Y + 1);
+        }
+
+        return filled;
+
+        void EnqueueIfNeeded(int nextX, int nextY)
+        {
+            if (!IsInside(nextX, nextY) || visited[nextX, nextY])
+            {
+                return;
+            }
+
+            visited[nextX, nextY] = true;
+            queue.Enqueue(new Point(nextX, nextY));
+        }
+    }
+
     public bool IsInside(int x, int y)
     {
         return x >= 0 && y >= 0 && x < Width && y < Height;

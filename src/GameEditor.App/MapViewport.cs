@@ -6,6 +6,8 @@ public sealed class MapViewport : ScrollableControl
     private IReadOnlyList<TileSet> tileSets = Array.Empty<TileSet>();
     private TileSet? selectedTileSet;
     private int selectedTileId;
+    private MouseButtons activeMouseButton;
+    private Point? lastEditedCell;
 
     public MapViewport()
     {
@@ -16,7 +18,15 @@ public sealed class MapViewport : ScrollableControl
         AutoScroll = true;
     }
 
-    public event EventHandler<Point>? TilePlaced;
+    public event EventHandler<MapEditAppliedEventArgs>? EditApplied;
+
+    [System.ComponentModel.Browsable(false)]
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public MapEditTool EditTool { get; set; } = MapEditTool.Pen;
+
+    [System.ComponentModel.Browsable(false)]
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public MapEditTool SecondaryEditTool { get; set; } = MapEditTool.Eraser;
 
     [System.ComponentModel.Browsable(false)]
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
@@ -90,24 +100,89 @@ public sealed class MapViewport : ScrollableControl
     {
         base.OnMouseDown(e);
 
-        if (document is null || selectedTileSet is null || e.Button != MouseButtons.Left)
+        activeMouseButton = e.Button;
+        lastEditedCell = null;
+        ApplyToolAt(e.Location, e.Button, isDrag: false);
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        base.OnMouseMove(e);
+
+        if (activeMouseButton == MouseButtons.None || (e.Button & activeMouseButton) == 0)
         {
             return;
         }
 
-        var mapX = e.X - AutoScrollPosition.X;
-        var mapY = e.Y - AutoScrollPosition.Y;
-        var tileX = mapX / document.TileSize;
-        var tileY = mapY / document.TileSize;
+        ApplyToolAt(e.Location, activeMouseButton, isDrag: true);
+    }
 
-        if (!document.IsInside(tileX, tileY))
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        base.OnMouseUp(e);
+
+        if (e.Button == activeMouseButton)
+        {
+            activeMouseButton = MouseButtons.None;
+            lastEditedCell = null;
+        }
+    }
+
+    private void ApplyToolAt(Point location, MouseButtons button, bool isDrag)
+    {
+        if (document is null)
         {
             return;
         }
 
-        document.SetTile(selectedTileSet.Kind, tileX, tileY, new TilePlacement(selectedTileSet.Index, selectedTileId));
-        Invalidate(GetInvalidationRectangle(tileX, tileY));
-        TilePlaced?.Invoke(this, new Point(tileX, tileY));
+        var cell = GetCellFromLocation(location);
+
+        if (!document.IsInside(cell.X, cell.Y) || (isDrag && lastEditedCell == cell))
+        {
+            return;
+        }
+
+        var tool = ResolveTool(button);
+        if (isDrag && tool != MapEditTool.Pen && tool != MapEditTool.Eraser)
+        {
+            return;
+        }
+
+        if (isDrag && lastEditedCell is { } previousCell && previousCell != cell)
+        {
+            foreach (var lineCell in EnumerateLine(previousCell, cell).Skip(1))
+            {
+                if (tool == MapEditTool.Pen)
+                {
+                    ApplyPen(lineCell);
+                }
+                else if (tool == MapEditTool.Eraser)
+                {
+                    ApplyEraser(lineCell);
+                }
+            }
+
+            return;
+        }
+
+        switch (tool)
+        {
+            case MapEditTool.Pen:
+                ApplyPen(cell);
+                break;
+            case MapEditTool.Eraser:
+                ApplyEraser(cell);
+                break;
+            case MapEditTool.Fill:
+                if (!isDrag)
+                {
+                    ApplyFill(cell);
+                }
+
+                break;
+            case MapEditTool.Select:
+                break;
+        }
     }
 
     private void UpdateScrollSize()
@@ -124,6 +199,120 @@ public sealed class MapViewport : ScrollableControl
 
         DrawLayer(graphics, TileSetKind.Base);
         DrawLayer(graphics, TileSetKind.Advanced);
+    }
+
+    private void ApplyPen(Point cell)
+    {
+        if (document is null || selectedTileSet is null || selectedTileId < 0)
+        {
+            return;
+        }
+
+        var placement = new TilePlacement(selectedTileSet.Index, selectedTileId);
+        var current = document.GetTile(selectedTileSet.Kind, cell.X, cell.Y);
+        if (current == placement)
+        {
+            lastEditedCell = cell;
+            return;
+        }
+
+        document.SetTile(selectedTileSet.Kind, cell.X, cell.Y, placement);
+        lastEditedCell = cell;
+        Invalidate(GetInvalidationRectangle(cell.X, cell.Y));
+        EditApplied?.Invoke(this, new MapEditAppliedEventArgs(MapEditTool.Pen, selectedTileSet.Kind, cell, 1));
+    }
+
+    private void ApplyEraser(Point cell)
+    {
+        if (document is null || selectedTileSet is null)
+        {
+            return;
+        }
+
+        var current = document.GetTile(selectedTileSet.Kind, cell.X, cell.Y);
+        if (current.IsEmpty)
+        {
+            lastEditedCell = cell;
+            return;
+        }
+
+        document.SetTile(selectedTileSet.Kind, cell.X, cell.Y, TilePlacement.Empty);
+        lastEditedCell = cell;
+        Invalidate(GetInvalidationRectangle(cell.X, cell.Y));
+        EditApplied?.Invoke(this, new MapEditAppliedEventArgs(MapEditTool.Eraser, selectedTileSet.Kind, cell, 1));
+    }
+
+    private void ApplyFill(Point cell)
+    {
+        if (document is null || selectedTileSet is null || selectedTileId < 0)
+        {
+            return;
+        }
+
+        var placement = new TilePlacement(selectedTileSet.Index, selectedTileId);
+        var affectedTiles = document.FloodFill(selectedTileSet.Kind, cell.X, cell.Y, placement);
+        if (affectedTiles == 0)
+        {
+            lastEditedCell = cell;
+            return;
+        }
+
+        lastEditedCell = cell;
+        Invalidate();
+        EditApplied?.Invoke(this, new MapEditAppliedEventArgs(MapEditTool.Fill, selectedTileSet.Kind, cell, affectedTiles));
+    }
+
+    private Point GetCellFromLocation(Point location)
+    {
+        if (document is null)
+        {
+            return new Point(-1, -1);
+        }
+
+        var mapX = location.X - AutoScrollPosition.X;
+        var mapY = location.Y - AutoScrollPosition.Y;
+        return new Point(mapX / document.TileSize, mapY / document.TileSize);
+    }
+
+    private MapEditTool ResolveTool(MouseButtons button)
+    {
+        return button == MouseButtons.Right ? SecondaryEditTool : EditTool;
+    }
+
+    private static IEnumerable<Point> EnumerateLine(Point start, Point end)
+    {
+        var x0 = start.X;
+        var y0 = start.Y;
+        var x1 = end.X;
+        var y1 = end.Y;
+        var dx = Math.Abs(x1 - x0);
+        var sx = x0 < x1 ? 1 : -1;
+        var dy = -Math.Abs(y1 - y0);
+        var sy = y0 < y1 ? 1 : -1;
+        var error = dx + dy;
+
+        while (true)
+        {
+            yield return new Point(x0, y0);
+
+            if (x0 == x1 && y0 == y1)
+            {
+                yield break;
+            }
+
+            var doubledError = 2 * error;
+            if (doubledError >= dy)
+            {
+                error += dy;
+                x0 += sx;
+            }
+
+            if (doubledError <= dx)
+            {
+                error += dx;
+                y0 += sy;
+            }
+        }
     }
 
     private void DrawLayer(Graphics graphics, TileSetKind kind)

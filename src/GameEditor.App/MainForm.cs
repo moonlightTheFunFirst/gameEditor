@@ -11,6 +11,10 @@ public sealed class MainForm : Form
     private readonly TilePaletteControl basePalette = new();
     private readonly TilePaletteControl advancedPalette = new();
     private readonly ListView properties = new();
+    private readonly ToolStripButton penToolButton = new("ペン");
+    private readonly ToolStripButton fillToolButton = new("塗りつぶし");
+    private readonly ToolStripButton eraserToolButton = new("消しゴム");
+    private readonly ToolStripButton selectToolButton = new("選択");
 
     private readonly List<TileSet> tileSets = [];
     private MapDocument mapDocument = new(40, 30, InitialTileSize);
@@ -38,16 +42,16 @@ public sealed class MainForm : Form
         basePalette.SelectedTileChanged += (_, _) => UpdateSelectedTile();
         advancedPalette.SelectedTileChanged += (_, _) => UpdateSelectedTile();
         tileSetTabs.SelectedIndexChanged += (_, _) => UpdateActivePalette();
-        mapViewport.TilePlaced += (_, point) =>
+        mapViewport.EditApplied += (_, args) =>
         {
-            var tileSet = mapViewport.SelectedTileSet;
-            statusLabel.Text = tileSet is null
-                ? $"配置: ({point.X}, {point.Y})"
-                : $"配置: ({point.X}, {point.Y}) / {GetKindName(tileSet.Kind)} Tile {mapViewport.SelectedTileId}";
+            var layer = args.LayerKind is null ? "" : $" / {GetKindName(args.LayerKind.Value)}";
+            statusLabel.Text = $"{GetToolName(args.Tool)}: ({args.Cell.X}, {args.Cell.Y}){layer} / {args.AffectedTiles} tiles";
         };
         Load += (_, _) => LoadSampleTileSets();
 
         mapViewport.Document = mapDocument;
+        mapViewport.SecondaryEditTool = MapEditTool.Eraser;
+        SetEditTool(MapEditTool.Pen);
         statusLabel.Text = "Ready";
     }
 
@@ -105,9 +109,10 @@ public sealed class MainForm : Form
         toolStrip.Items.Add(new ToolStripButton("開く", null, (_, _) => OpenMap()));
         toolStrip.Items.Add(new ToolStripButton("保存", null, (_, _) => SaveMap()));
         toolStrip.Items.Add(new ToolStripSeparator());
-        toolStrip.Items.Add(new ToolStripButton("ペン"));
-        toolStrip.Items.Add(new ToolStripButton("消しゴム"));
-        toolStrip.Items.Add(new ToolStripButton("選択"));
+        toolStrip.Items.Add(ConfigureToolButton(penToolButton, MapEditTool.Pen));
+        toolStrip.Items.Add(ConfigureToolButton(fillToolButton, MapEditTool.Fill));
+        toolStrip.Items.Add(ConfigureToolButton(eraserToolButton, MapEditTool.Eraser));
+        toolStrip.Items.Add(ConfigureToolButton(selectToolButton, MapEditTool.Select));
 
         return toolStrip;
     }
@@ -271,6 +276,8 @@ public sealed class MainForm : Form
         properties.Items.Add(new ListViewItem(new[] { "マップサイズ", $"{mapDocument.Width}x{mapDocument.Height}" }));
         properties.Items.Add(new ListViewItem(new[] { "チップサイズ", $"{mapDocument.TileSize}x{mapDocument.TileSize}" }));
         properties.Items.Add(new ListViewItem(new[] { "編集レイヤー", tileSet is null ? "未読み込み" : GetKindName(tileSet.Kind) }));
+        properties.Items.Add(new ListViewItem(new[] { "左クリック", GetToolName(mapViewport.EditTool) }));
+        properties.Items.Add(new ListViewItem(new[] { "右クリック", GetToolName(mapViewport.SecondaryEditTool) }));
         properties.Items.Add(new ListViewItem(new[] { "選択チップ", selectedTileId.ToString() }));
 
         if (tileSet is not null)
@@ -304,6 +311,41 @@ public sealed class MainForm : Form
     private static string GetKindName(TileSetKind kind)
     {
         return kind == TileSetKind.Base ? "ベース" : "アドバンス";
+    }
+
+    private static string GetToolName(MapEditTool tool)
+    {
+        return tool switch
+        {
+            MapEditTool.Pen => "ペン",
+            MapEditTool.Fill => "塗りつぶし",
+            MapEditTool.Eraser => "消しゴム",
+            MapEditTool.Select => "選択",
+            _ => tool.ToString()
+        };
+    }
+
+    private ToolStripButton ConfigureToolButton(ToolStripButton button, MapEditTool tool)
+    {
+        button.CheckOnClick = false;
+        button.Click += (_, _) => SetEditTool(tool);
+        return button;
+    }
+
+    private void SetEditTool(MapEditTool tool)
+    {
+        mapViewport.EditTool = tool;
+        UpdateToolButtonChecks();
+        RefreshProperties();
+        statusLabel.Text = $"ツール: {GetToolName(tool)}";
+    }
+
+    private void UpdateToolButtonChecks()
+    {
+        penToolButton.Checked = mapViewport.EditTool == MapEditTool.Pen;
+        fillToolButton.Checked = mapViewport.EditTool == MapEditTool.Fill;
+        eraserToolButton.Checked = mapViewport.EditTool == MapEditTool.Eraser;
+        selectToolButton.Checked = mapViewport.EditTool == MapEditTool.Select;
     }
 
     private void SaveMap()
