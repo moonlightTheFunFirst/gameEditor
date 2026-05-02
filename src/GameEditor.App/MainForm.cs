@@ -7,7 +7,11 @@ public sealed class MainForm : Form
     private const int TilePanelPadding = 8;
     private const int TilePanelExtraWidth = 10;
     private const int TilePanelInitialWidth = (InitialTileSize * TileSetColumns) + (TilePanelPadding * 2) + TilePanelExtraWidth;
+    private const int WmSetRedraw = 0x000B;
     private static readonly Color EmptyWorkspaceColor = Color.FromArgb(44, 46, 50);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
     private readonly ToolStripStatusLabel statusLabel = new();
     private readonly SplitContainer workspaceSplit = new();
@@ -27,6 +31,9 @@ public sealed class MainForm : Form
     private readonly ToolStripButton redoButton = new("やり直し");
     private readonly ToolStripMenuItem undoMenuItem = new("元に戻す");
     private readonly ToolStripMenuItem redoMenuItem = new("やり直し");
+    private readonly ToolStripMenuItem closeMapMenuItem = new("閉じる");
+    private readonly ContextMenuStrip mapTabContextMenu = new();
+    private readonly ToolStripMenuItem closeMapTabMenuItem = new("閉じる");
 
     private TilePaletteControl? activePalette;
     private MapEditTool currentEditTool = MapEditTool.Pen;
@@ -36,6 +43,7 @@ public sealed class MainForm : Form
     private TileSet? previewBaseTileSet;
     private TileSet? previewAdvancedTileSet;
     private bool updatingTileSetSelectors;
+    private bool suppressDocumentActivation;
 
     public MainForm()
     {
@@ -59,7 +67,14 @@ public sealed class MainForm : Form
         basePalette.SelectedTileChanged += (_, _) => UpdateSelectedTile();
         advancedPalette.SelectedTileChanged += (_, _) => UpdateSelectedTile();
         tileSetTabs.SelectedIndexChanged += (_, _) => UpdateActivePalette();
-        mapTabs.SelectedIndexChanged += (_, _) => ActivateCurrentDocument();
+        mapTabs.SelectedIndexChanged += (_, _) =>
+        {
+            if (!suppressDocumentActivation)
+            {
+                ActivateCurrentDocument();
+            }
+        };
+        mapTabs.MouseUp += ShowMapTabContextMenu;
         baseTileSetSelector.SelectedIndexChanged += (_, _) => ChangeActiveTileSet(TileSetKind.Base);
         advancedTileSetSelector.SelectedIndexChanged += (_, _) => ChangeActiveTileSet(TileSetKind.Advanced);
         Shown += (_, _) => ApplyInitialTilePanelWidth();
@@ -83,6 +98,7 @@ public sealed class MainForm : Form
 
             previewBaseTileSet?.Dispose();
             previewAdvancedTileSet?.Dispose();
+            mapTabContextMenu.Dispose();
         }
 
         base.Dispose(disposing);
@@ -104,10 +120,13 @@ public sealed class MainForm : Form
         undoMenuItem.Click += (_, _) => UndoMapEdit();
         redoMenuItem.ShortcutKeys = Keys.Control | Keys.Y;
         redoMenuItem.Click += (_, _) => RedoMapEdit();
+        closeMapMenuItem.Click += (_, _) => CloseCurrentMap();
 
         var editMenu = new ToolStripMenuItem("編集");
         editMenu.DropDownItems.Add(undoMenuItem);
         editMenu.DropDownItems.Add(redoMenuItem);
+        editMenu.DropDownItems.Add(new ToolStripSeparator());
+        editMenu.DropDownItems.Add(closeMapMenuItem);
 
         var editorMenu = new ToolStripMenuItem("エディタ");
         editorMenu.DropDownItems.Add("マップエディター");
@@ -175,6 +194,17 @@ public sealed class MainForm : Form
         return workspaceSplit;
     }
 
+    private void ConfigureMapTabContextMenu()
+    {
+        if (mapTabContextMenu.Items.Count > 0)
+        {
+            return;
+        }
+
+        closeMapTabMenuItem.Click += (_, _) => CloseCurrentMap();
+        mapTabContextMenu.Items.Add(closeMapTabMenuItem);
+    }
+
     private Control BuildTilePanel()
     {
         var panel = new Panel
@@ -228,6 +258,7 @@ public sealed class MainForm : Form
             BackColor = SystemColors.Control
         };
 
+        ConfigureMapTabContextMenu();
         mapTabs.Dock = DockStyle.Fill;
         mapTabs.HeaderBackColor = SystemColors.Control;
         mapTabs.PageBackColor = SystemColors.Control;
@@ -493,6 +524,37 @@ public sealed class MainForm : Form
         viewport.SelectedTileId = activePalette.SelectedTileId;
         viewport.EditTool = currentEditTool;
         viewport.SecondaryEditTool = currentSecondaryEditTool;
+    }
+
+    private void ShowMapTabContextMenu(object? sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Right)
+        {
+            return;
+        }
+
+        var tabIndex = GetMapTabIndexAt(e.Location);
+        if (tabIndex < 0)
+        {
+            return;
+        }
+
+        mapTabs.SelectedIndex = tabIndex;
+        closeMapTabMenuItem.Enabled = CurrentDocument is not null;
+        mapTabContextMenu.Show(mapTabs, e.Location);
+    }
+
+    private int GetMapTabIndexAt(Point location)
+    {
+        for (var i = 0; i < mapTabs.TabPages.Count; i++)
+        {
+            if (mapTabs.GetTabRect(i).Contains(location))
+            {
+                return i;
+            }
+        }
+
+        return -1;
     }
 
     private void ChangeActiveTileSet(TileSetKind kind)
@@ -778,6 +840,63 @@ public sealed class MainForm : Form
         }
     }
 
+    private void CloseCurrentMap()
+    {
+        var page = mapTabs.SelectedTab;
+        if (page is null || page.Tag is not MapEditorDocument document)
+        {
+            statusLabel.Text = "閉じるマップがありません";
+            return;
+        }
+
+        var closedName = document.Name;
+        var closingIndex = mapTabs.SelectedIndex;
+        var nextIndex = mapTabs.TabPages.Count > 1
+            ? Math.Min(closingIndex, mapTabs.TabPages.Count - 2)
+            : -1;
+
+        suppressDocumentActivation = true;
+        SetRedraw(mapTabs, enabled: false);
+        mapTabs.SuspendLayout();
+        try
+        {
+            mapTabs.TabPages.Remove(page);
+            document.Dispose();
+            page.Tag = null;
+            page.Dispose();
+
+            if (nextIndex >= 0)
+            {
+                mapTabs.SelectedIndex = nextIndex;
+            }
+        }
+        finally
+        {
+            suppressDocumentActivation = false;
+            ActivateCurrentDocument();
+            mapTabs.ResumeLayout(performLayout: true);
+            SetRedraw(mapTabs, enabled: true);
+        }
+
+        statusLabel.Text = $"閉じました: {closedName}";
+    }
+
+    private static void SetRedraw(Control control, bool enabled)
+    {
+        if (!control.IsHandleCreated)
+        {
+            return;
+        }
+
+        SendMessage(control.Handle, WmSetRedraw, new IntPtr(enabled ? 1 : 0), IntPtr.Zero);
+
+        if (enabled)
+        {
+            control.Invalidate(invalidateChildren: true);
+            control.Update();
+        }
+    }
+
     private void UndoMapEdit()
     {
         var document = CurrentDocument;
@@ -861,6 +980,8 @@ public sealed class MainForm : Form
         redoButton.Enabled = document?.History.CanRedo == true;
         undoMenuItem.Enabled = undoButton.Enabled;
         redoMenuItem.Enabled = redoButton.Enabled;
+        closeMapMenuItem.Enabled = hasDocument;
+        closeMapTabMenuItem.Enabled = hasDocument;
         penToolButton.Enabled = hasDocument;
         fillToolButton.Enabled = hasDocument;
         eraserToolButton.Enabled = hasDocument;
