@@ -10,6 +10,9 @@ public sealed class DocumentTabControl : TabControl
         Padding = new Point(12, 4);
         ItemSize = new Size(112, 24);
         BackColor = SystemColors.Control;
+        DoubleBuffered = true;
+        ResizeRedraw = true;
+        SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
     }
 
     [System.ComponentModel.Browsable(false)]

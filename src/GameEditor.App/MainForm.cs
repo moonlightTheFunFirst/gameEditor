@@ -16,6 +16,7 @@ public sealed class MainForm : Form
     private readonly ToolStripStatusLabel statusLabel = new();
     private readonly SplitContainer workspaceSplit = new();
     private readonly DocumentTabControl mapTabs = new();
+    private readonly Panel mapHostPanel = new();
     private readonly Panel emptyMapPanel = new();
     private readonly TabControl tileSetTabs = new();
     private readonly ComboBox baseTileSetSelector = new();
@@ -252,11 +253,8 @@ public sealed class MainForm : Form
         split.Panel1.BackColor = SystemColors.Control;
         split.Panel2.BackColor = SystemColors.Control;
 
-        var mapHost = new Panel
-        {
-            Dock = DockStyle.Fill,
-            BackColor = SystemColors.Control
-        };
+        mapHostPanel.Dock = DockStyle.Fill;
+        mapHostPanel.BackColor = SystemColors.Control;
 
         ConfigureMapTabContextMenu();
         mapTabs.Dock = DockStyle.Fill;
@@ -265,9 +263,9 @@ public sealed class MainForm : Form
         mapTabs.Visible = false;
         emptyMapPanel.Dock = DockStyle.Fill;
         emptyMapPanel.Visible = true;
-        mapHost.Controls.Add(mapTabs);
-        mapHost.Controls.Add(emptyMapPanel);
-        split.Panel1.Controls.Add(mapHost);
+        mapHostPanel.Controls.Add(mapTabs);
+        mapHostPanel.Controls.Add(emptyMapPanel);
+        split.Panel1.Controls.Add(mapHostPanel);
         split.Panel2.Controls.Add(BuildPropertyPanel());
 
         return split;
@@ -851,24 +849,24 @@ public sealed class MainForm : Form
 
         var closedName = document.Name;
         var closingIndex = mapTabs.SelectedIndex;
-        var nextIndex = mapTabs.TabPages.Count > 1
-            ? Math.Min(closingIndex, mapTabs.TabPages.Count - 2)
-            : -1;
+        var nextPage = GetNextMapTabPage(closingIndex);
 
         suppressDocumentActivation = true;
+        SetRedraw(mapHostPanel, enabled: false);
         SetRedraw(mapTabs, enabled: false);
+        mapHostPanel.SuspendLayout();
         mapTabs.SuspendLayout();
         try
         {
+            if (nextPage is not null)
+            {
+                mapTabs.SelectedTab = nextPage;
+            }
+
             mapTabs.TabPages.Remove(page);
             document.Dispose();
             page.Tag = null;
             page.Dispose();
-
-            if (nextIndex >= 0)
-            {
-                mapTabs.SelectedIndex = nextIndex;
-            }
         }
         finally
         {
@@ -876,9 +874,24 @@ public sealed class MainForm : Form
             ActivateCurrentDocument();
             mapTabs.ResumeLayout(performLayout: true);
             SetRedraw(mapTabs, enabled: true);
+            mapHostPanel.ResumeLayout(performLayout: true);
+            SetRedraw(mapHostPanel, enabled: true);
         }
 
         statusLabel.Text = $"閉じました: {closedName}";
+    }
+
+    private TabPage? GetNextMapTabPage(int closingIndex)
+    {
+        if (mapTabs.TabPages.Count <= 1)
+        {
+            return null;
+        }
+
+        var nextIndex = closingIndex < mapTabs.TabPages.Count - 1
+            ? closingIndex + 1
+            : closingIndex - 1;
+        return mapTabs.TabPages[nextIndex];
     }
 
     private static void SetRedraw(Control control, bool enabled)
