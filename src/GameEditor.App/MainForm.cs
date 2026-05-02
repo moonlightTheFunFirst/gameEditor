@@ -10,10 +10,10 @@ public sealed class MainForm : Form
     private readonly TabControl tileSetTabs = new();
     private readonly TilePaletteControl basePalette = new();
     private readonly TilePaletteControl advancedPalette = new();
-    private readonly MapDocument mapDocument = new(40, 30, InitialTileSize);
     private readonly ListView properties = new();
 
     private readonly List<TileSet> tileSets = [];
+    private MapDocument mapDocument = new(40, 30, InitialTileSize);
     private TilePaletteControl? activePalette;
     private string? currentMapPath;
 
@@ -70,7 +70,7 @@ public sealed class MainForm : Form
 
         var fileMenu = new ToolStripMenuItem("ファイル");
         fileMenu.DropDownItems.Add("新規プロジェクト");
-        fileMenu.DropDownItems.Add("開く");
+        fileMenu.DropDownItems.Add("開く", null, (_, _) => OpenMap());
         fileMenu.DropDownItems.Add("保存", null, (_, _) => SaveMap());
         fileMenu.DropDownItems.Add("名前を付けて保存", null, (_, _) => SaveMapAs());
         fileMenu.DropDownItems.Add(new ToolStripSeparator());
@@ -102,7 +102,7 @@ public sealed class MainForm : Form
         };
 
         toolStrip.Items.Add(new ToolStripButton("新規"));
-        toolStrip.Items.Add(new ToolStripButton("開く"));
+        toolStrip.Items.Add(new ToolStripButton("開く", null, (_, _) => OpenMap()));
         toolStrip.Items.Add(new ToolStripButton("保存", null, (_, _) => SaveMap()));
         toolStrip.Items.Add(new ToolStripSeparator());
         toolStrip.Items.Add(new ToolStripButton("ペン"));
@@ -207,35 +207,30 @@ public sealed class MainForm : Form
     {
         try
         {
-            tileSets.Clear();
-
             const string baseImagePath = "resources/image/base_tiles.bmp";
             const string advancedImagePath = "resources/image/advanced_tiles.bmp";
 
-            tileSets.Add(TileSet.Load(
-                0,
-                "base",
-                "ベース",
-                TileSetKind.Base,
-                ResolveResourcePath(baseImagePath),
-                baseImagePath,
-                InitialTileSize));
+            ReplaceTileSets(
+            [
+                TileSet.Load(
+                    0,
+                    "base",
+                    "ベース",
+                    TileSetKind.Base,
+                    ResolveResourcePath(baseImagePath),
+                    baseImagePath,
+                    InitialTileSize),
+                TileSet.Load(
+                    1,
+                    "advanced",
+                    "アドバンス",
+                    TileSetKind.Advanced,
+                    ResolveResourcePath(advancedImagePath),
+                    advancedImagePath,
+                    InitialTileSize,
+                    AdvancedTransparentColor)
+            ]);
 
-            tileSets.Add(TileSet.Load(
-                1,
-                "advanced",
-                "アドバンス",
-                TileSetKind.Advanced,
-                ResolveResourcePath(advancedImagePath),
-                advancedImagePath,
-                InitialTileSize,
-                AdvancedTransparentColor));
-
-            basePalette.TileSet = tileSets[0];
-            advancedPalette.TileSet = tileSets[1];
-            mapViewport.TileSets = tileSets;
-            activePalette = basePalette;
-            UpdateActivePalette();
             RefreshProperties();
             statusLabel.Text = "Tilesets loaded";
         }
@@ -362,6 +357,63 @@ public sealed class MainForm : Form
             MessageBox.Show(this, ex.Message, "Save error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             statusLabel.Text = "Save failed";
         }
+    }
+
+    private void OpenMap()
+    {
+        using var dialog = new OpenFileDialog
+        {
+            AddExtension = true,
+            DefaultExt = "gemap.json",
+            Filter = "gameEditor map (*.gemap.json)|*.gemap.json|JSON (*.json)|*.json|All files (*.*)|*.*",
+            Title = "マップを開く"
+        };
+
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        LoadMapFrom(dialog.FileName);
+    }
+
+    private void LoadMapFrom(string path)
+    {
+        try
+        {
+            var loaded = MapSerializer.Load(path);
+
+            mapDocument = loaded.Document;
+            mapViewport.Document = mapDocument;
+            ReplaceTileSets(loaded.TileSets);
+
+            currentMapPath = path;
+            Text = $"gameEditor - {loaded.MapName}";
+            statusLabel.Text = $"読み込みました: {Path.GetFileName(path)}";
+            RefreshProperties();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Load error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            statusLabel.Text = "Load failed";
+        }
+    }
+
+    private void ReplaceTileSets(IEnumerable<TileSet> newTileSets)
+    {
+        foreach (var tileSet in tileSets)
+        {
+            tileSet.Dispose();
+        }
+
+        tileSets.Clear();
+        tileSets.AddRange(newTileSets);
+
+        basePalette.TileSet = tileSets.FirstOrDefault(tileSet => tileSet.Kind == TileSetKind.Base);
+        advancedPalette.TileSet = tileSets.FirstOrDefault(tileSet => tileSet.Kind == TileSetKind.Advanced);
+        mapViewport.TileSets = tileSets;
+        activePalette = tileSetTabs.SelectedIndex == 1 ? advancedPalette : basePalette;
+        UpdateActivePalette();
     }
 
     private static string ResolveResourcePath(params string[] segments)
