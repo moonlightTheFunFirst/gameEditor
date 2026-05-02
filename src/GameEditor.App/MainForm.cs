@@ -3,9 +3,14 @@ namespace GameEditor;
 public sealed class MainForm : Form
 {
     private const int InitialTileSize = 32;
+    private const int TileSetColumns = 8;
+    private const int TilePanelPadding = 8;
+    private const int TilePanelExtraWidth = 10;
+    private const int TilePanelInitialWidth = (InitialTileSize * TileSetColumns) + (TilePanelPadding * 2) + TilePanelExtraWidth;
     private static readonly Color EmptyWorkspaceColor = Color.FromArgb(44, 46, 50);
 
     private readonly ToolStripStatusLabel statusLabel = new();
+    private readonly SplitContainer workspaceSplit = new();
     private readonly DocumentTabControl mapTabs = new();
     private readonly Panel emptyMapPanel = new();
     private readonly TabControl tileSetTabs = new();
@@ -57,6 +62,7 @@ public sealed class MainForm : Form
         mapTabs.SelectedIndexChanged += (_, _) => ActivateCurrentDocument();
         baseTileSetSelector.SelectedIndexChanged += (_, _) => ChangeActiveTileSet(TileSetKind.Base);
         advancedTileSetSelector.SelectedIndexChanged += (_, _) => ChangeActiveTileSet(TileSetKind.Advanced);
+        Shown += (_, _) => ApplyInitialTilePanelWidth();
 
         ConfigureEmptyMapPanel();
         SetDefaultPaletteTileSets();
@@ -157,18 +163,16 @@ public sealed class MainForm : Form
 
     private Control BuildWorkspace()
     {
-        var rootSplit = new SplitContainer
-        {
-            Dock = DockStyle.Fill,
-            FixedPanel = FixedPanel.Panel1,
-            SplitterWidth = 6,
-            SplitterDistance = 260
-        };
+        workspaceSplit.Dock = DockStyle.Fill;
+        workspaceSplit.FixedPanel = FixedPanel.Panel1;
+        workspaceSplit.Panel1MinSize = TilePanelInitialWidth;
+        workspaceSplit.SplitterWidth = 6;
+        workspaceSplit.SplitterDistance = TilePanelInitialWidth;
 
-        rootSplit.Panel1.Controls.Add(BuildTilePanel());
-        rootSplit.Panel2.Controls.Add(BuildEditorArea());
+        workspaceSplit.Panel1.Controls.Add(BuildTilePanel());
+        workspaceSplit.Panel2.Controls.Add(BuildEditorArea());
 
-        return rootSplit;
+        return workspaceSplit;
     }
 
     private Control BuildTilePanel()
@@ -176,7 +180,7 @@ public sealed class MainForm : Form
         var panel = new Panel
         {
             Dock = DockStyle.Fill,
-            Padding = new Padding(8)
+            Padding = new Padding(TilePanelPadding)
         };
 
         var title = new Label
@@ -192,6 +196,17 @@ public sealed class MainForm : Form
         panel.Controls.Add(title);
 
         return panel;
+    }
+
+    private void ApplyInitialTilePanelWidth()
+    {
+        if (workspaceSplit.Width <= TilePanelInitialWidth)
+        {
+            return;
+        }
+
+        workspaceSplit.Panel1MinSize = TilePanelInitialWidth;
+        workspaceSplit.SplitterDistance = TilePanelInitialWidth;
     }
 
     private Control BuildEditorArea()
