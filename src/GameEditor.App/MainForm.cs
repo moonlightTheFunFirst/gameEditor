@@ -15,6 +15,11 @@ public sealed class MainForm : Form
     private readonly ToolStripButton fillToolButton = new("塗りつぶし");
     private readonly ToolStripButton eraserToolButton = new("消しゴム");
     private readonly ToolStripButton selectToolButton = new("選択");
+    private readonly ToolStripButton undoButton = new("元に戻す");
+    private readonly ToolStripButton redoButton = new("やり直し");
+    private readonly ToolStripMenuItem undoMenuItem = new("元に戻す");
+    private readonly ToolStripMenuItem redoMenuItem = new("やり直し");
+    private readonly MapEditHistory editHistory = new();
 
     private readonly List<TileSet> tileSets = [];
     private MapDocument mapDocument = new(40, 30, InitialTileSize);
@@ -47,11 +52,17 @@ public sealed class MainForm : Form
             var layer = args.LayerKind is null ? "" : $" / {GetKindName(args.LayerKind.Value)}";
             statusLabel.Text = $"{GetToolName(args.Tool)}: ({args.Cell.X}, {args.Cell.Y}){layer} / {args.AffectedTiles} tiles";
         };
+        mapViewport.EditCommandCommitted += (_, command) =>
+        {
+            editHistory.Push(command);
+            UpdateUndoRedoState();
+        };
         Load += (_, _) => LoadSampleTileSets();
 
         mapViewport.Document = mapDocument;
         mapViewport.SecondaryEditTool = MapEditTool.Eraser;
         SetEditTool(MapEditTool.Pen);
+        UpdateUndoRedoState();
         statusLabel.Text = "Ready";
     }
 
@@ -86,11 +97,21 @@ public sealed class MainForm : Form
         editorMenu.DropDownItems.Add("エフェクトエディター");
         editorMenu.DropDownItems.Add("コリジョンエディター");
 
+        undoMenuItem.ShortcutKeys = Keys.Control | Keys.Z;
+        undoMenuItem.Click += (_, _) => UndoMapEdit();
+        redoMenuItem.ShortcutKeys = Keys.Control | Keys.Y;
+        redoMenuItem.Click += (_, _) => RedoMapEdit();
+
+        var editMenu = new ToolStripMenuItem("編集");
+        editMenu.DropDownItems.Add(undoMenuItem);
+        editMenu.DropDownItems.Add(redoMenuItem);
+
         var viewMenu = new ToolStripMenuItem("表示");
         viewMenu.DropDownItems.Add("グリッド");
         viewMenu.DropDownItems.Add("ズームリセット");
 
         menu.Items.Add(fileMenu);
+        menu.Items.Add(editMenu);
         menu.Items.Add(editorMenu);
         menu.Items.Add(viewMenu);
 
@@ -108,6 +129,11 @@ public sealed class MainForm : Form
         toolStrip.Items.Add(new ToolStripButton("新規"));
         toolStrip.Items.Add(new ToolStripButton("開く", null, (_, _) => OpenMap()));
         toolStrip.Items.Add(new ToolStripButton("保存", null, (_, _) => SaveMap()));
+        toolStrip.Items.Add(new ToolStripSeparator());
+        undoButton.Click += (_, _) => UndoMapEdit();
+        redoButton.Click += (_, _) => RedoMapEdit();
+        toolStrip.Items.Add(undoButton);
+        toolStrip.Items.Add(redoButton);
         toolStrip.Items.Add(new ToolStripSeparator());
         toolStrip.Items.Add(ConfigureToolButton(penToolButton, MapEditTool.Pen));
         toolStrip.Items.Add(ConfigureToolButton(fillToolButton, MapEditTool.Fill));
@@ -278,6 +304,8 @@ public sealed class MainForm : Form
         properties.Items.Add(new ListViewItem(new[] { "編集レイヤー", tileSet is null ? "未読み込み" : GetKindName(tileSet.Kind) }));
         properties.Items.Add(new ListViewItem(new[] { "左クリック", GetToolName(mapViewport.EditTool) }));
         properties.Items.Add(new ListViewItem(new[] { "右クリック", GetToolName(mapViewport.SecondaryEditTool) }));
+        properties.Items.Add(new ListViewItem(new[] { "Undo", editHistory.CanUndo ? "可" : "不可" }));
+        properties.Items.Add(new ListViewItem(new[] { "Redo", editHistory.CanRedo ? "可" : "不可" }));
         properties.Items.Add(new ListViewItem(new[] { "選択チップ", selectedTileId.ToString() }));
 
         if (tileSet is not null)
@@ -346,6 +374,43 @@ public sealed class MainForm : Form
         fillToolButton.Checked = mapViewport.EditTool == MapEditTool.Fill;
         eraserToolButton.Checked = mapViewport.EditTool == MapEditTool.Eraser;
         selectToolButton.Checked = mapViewport.EditTool == MapEditTool.Select;
+    }
+
+    private void UndoMapEdit()
+    {
+        var command = editHistory.Undo(mapDocument);
+        if (command is null)
+        {
+            statusLabel.Text = "Undo できません";
+            return;
+        }
+
+        mapViewport.Invalidate();
+        UpdateUndoRedoState();
+        statusLabel.Text = $"Undo: {command.Name}";
+    }
+
+    private void RedoMapEdit()
+    {
+        var command = editHistory.Redo(mapDocument);
+        if (command is null)
+        {
+            statusLabel.Text = "Redo できません";
+            return;
+        }
+
+        mapViewport.Invalidate();
+        UpdateUndoRedoState();
+        statusLabel.Text = $"Redo: {command.Name}";
+    }
+
+    private void UpdateUndoRedoState()
+    {
+        undoButton.Enabled = editHistory.CanUndo;
+        redoButton.Enabled = editHistory.CanRedo;
+        undoMenuItem.Enabled = editHistory.CanUndo;
+        redoMenuItem.Enabled = editHistory.CanRedo;
+        RefreshProperties();
     }
 
     private void SaveMap()
@@ -428,6 +493,8 @@ public sealed class MainForm : Form
             mapDocument = loaded.Document;
             mapViewport.Document = mapDocument;
             ReplaceTileSets(loaded.TileSets);
+            editHistory.Clear();
+            UpdateUndoRedoState();
 
             currentMapPath = path;
             Text = $"gameEditor - {loaded.MapName}";
@@ -456,6 +523,25 @@ public sealed class MainForm : Form
         mapViewport.TileSets = tileSets;
         activePalette = tileSetTabs.SelectedIndex == 1 ? advancedPalette : basePalette;
         UpdateActivePalette();
+        editHistory.Clear();
+        UpdateUndoRedoState();
+    }
+
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (keyData == (Keys.Control | Keys.Z))
+        {
+            UndoMapEdit();
+            return true;
+        }
+
+        if (keyData == (Keys.Control | Keys.Y) || keyData == (Keys.Control | Keys.Shift | Keys.Z))
+        {
+            RedoMapEdit();
+            return true;
+        }
+
+        return base.ProcessCmdKey(ref msg, keyData);
     }
 
     private static string ResolveResourcePath(params string[] segments)

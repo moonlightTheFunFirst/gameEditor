@@ -8,6 +8,9 @@ public sealed class MapViewport : ScrollableControl
     private int selectedTileId;
     private MouseButtons activeMouseButton;
     private Point? lastEditedCell;
+    private readonly List<TileChange> pendingStrokeChanges = [];
+    private MapEditTool pendingStrokeTool;
+    private TileSetKind? pendingStrokeLayerKind;
 
     public MapViewport()
     {
@@ -19,6 +22,8 @@ public sealed class MapViewport : ScrollableControl
     }
 
     public event EventHandler<MapEditAppliedEventArgs>? EditApplied;
+
+    public event EventHandler<IMapEditCommand>? EditCommandCommitted;
 
     [System.ComponentModel.Browsable(false)]
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
@@ -102,6 +107,7 @@ public sealed class MapViewport : ScrollableControl
 
         activeMouseButton = e.Button;
         lastEditedCell = null;
+        BeginStroke(ResolveTool(e.Button));
         ApplyToolAt(e.Location, e.Button, isDrag: false);
     }
 
@@ -123,6 +129,7 @@ public sealed class MapViewport : ScrollableControl
 
         if (e.Button == activeMouseButton)
         {
+            CommitStroke();
             activeMouseButton = MouseButtons.None;
             lastEditedCell = null;
         }
@@ -216,7 +223,14 @@ public sealed class MapViewport : ScrollableControl
             return;
         }
 
-        document.SetTile(selectedTileSet.Kind, cell.X, cell.Y, placement);
+        var change = document.SetTileWithChange(selectedTileSet.Kind, cell.X, cell.Y, placement);
+        if (change is null)
+        {
+            lastEditedCell = cell;
+            return;
+        }
+
+        AddStrokeChange(change.Value);
         lastEditedCell = cell;
         Invalidate(GetInvalidationRectangle(cell.X, cell.Y));
         EditApplied?.Invoke(this, new MapEditAppliedEventArgs(MapEditTool.Pen, selectedTileSet.Kind, cell, 1));
@@ -236,7 +250,14 @@ public sealed class MapViewport : ScrollableControl
             return;
         }
 
-        document.SetTile(selectedTileSet.Kind, cell.X, cell.Y, TilePlacement.Empty);
+        var change = document.SetTileWithChange(selectedTileSet.Kind, cell.X, cell.Y, TilePlacement.Empty);
+        if (change is null)
+        {
+            lastEditedCell = cell;
+            return;
+        }
+
+        AddStrokeChange(change.Value);
         lastEditedCell = cell;
         Invalidate(GetInvalidationRectangle(cell.X, cell.Y));
         EditApplied?.Invoke(this, new MapEditAppliedEventArgs(MapEditTool.Eraser, selectedTileSet.Kind, cell, 1));
@@ -250,8 +271,8 @@ public sealed class MapViewport : ScrollableControl
         }
 
         var placement = new TilePlacement(selectedTileSet.Index, selectedTileId);
-        var affectedTiles = document.FloodFill(selectedTileSet.Kind, cell.X, cell.Y, placement);
-        if (affectedTiles == 0)
+        var changes = document.FloodFillWithChanges(selectedTileSet.Kind, cell.X, cell.Y, placement);
+        if (changes.Count == 0)
         {
             lastEditedCell = cell;
             return;
@@ -259,7 +280,41 @@ public sealed class MapViewport : ScrollableControl
 
         lastEditedCell = cell;
         Invalidate();
-        EditApplied?.Invoke(this, new MapEditAppliedEventArgs(MapEditTool.Fill, selectedTileSet.Kind, cell, affectedTiles));
+        EditCommandCommitted?.Invoke(
+            this,
+            new TileEditCommand(GetCommandName(MapEditTool.Fill), selectedTileSet.Kind, changes));
+        EditApplied?.Invoke(this, new MapEditAppliedEventArgs(MapEditTool.Fill, selectedTileSet.Kind, cell, changes.Count));
+    }
+
+    private void BeginStroke(MapEditTool tool)
+    {
+        pendingStrokeChanges.Clear();
+        pendingStrokeTool = tool;
+        pendingStrokeLayerKind = selectedTileSet?.Kind;
+    }
+
+    private void AddStrokeChange(TileChange change)
+    {
+        if (pendingStrokeLayerKind is null)
+        {
+            pendingStrokeLayerKind = selectedTileSet?.Kind;
+        }
+
+        pendingStrokeChanges.Add(change);
+    }
+
+    private void CommitStroke()
+    {
+        if (pendingStrokeLayerKind is not { } layerKind || pendingStrokeChanges.Count == 0)
+        {
+            pendingStrokeChanges.Clear();
+            return;
+        }
+
+        EditCommandCommitted?.Invoke(
+            this,
+            new TileEditCommand(GetCommandName(pendingStrokeTool), layerKind, pendingStrokeChanges.ToArray()));
+        pendingStrokeChanges.Clear();
     }
 
     private Point GetCellFromLocation(Point location)
@@ -277,6 +332,18 @@ public sealed class MapViewport : ScrollableControl
     private MapEditTool ResolveTool(MouseButtons button)
     {
         return button == MouseButtons.Right ? SecondaryEditTool : EditTool;
+    }
+
+    private static string GetCommandName(MapEditTool tool)
+    {
+        return tool switch
+        {
+            MapEditTool.Pen => "ペン",
+            MapEditTool.Fill => "塗りつぶし",
+            MapEditTool.Eraser => "消しゴム",
+            MapEditTool.Select => "選択",
+            _ => tool.ToString()
+        };
     }
 
     private static IEnumerable<Point> EnumerateLine(Point start, Point end)

@@ -76,21 +76,39 @@ public sealed class MapDocument
         GetLayer(kind)[x, y] = placement;
     }
 
-    public int FloodFill(TileSetKind kind, int x, int y, TilePlacement replacement)
+    public TileChange? SetTileWithChange(TileSetKind kind, int x, int y, TilePlacement placement)
     {
         if (!IsInside(x, y))
         {
-            return 0;
+            return null;
+        }
+
+        var layer = GetLayer(kind);
+        var before = layer[x, y];
+        if (before == placement)
+        {
+            return null;
+        }
+
+        layer[x, y] = placement;
+        return new TileChange(x, y, before, placement);
+    }
+
+    public IReadOnlyList<TileChange> FloodFillWithChanges(TileSetKind kind, int x, int y, TilePlacement replacement)
+    {
+        if (!IsInside(x, y))
+        {
+            return [];
         }
 
         var layer = GetLayer(kind);
         var target = layer[x, y];
         if (target == replacement)
         {
-            return 0;
+            return [];
         }
 
-        var filled = 0;
+        var changes = new List<TileChange>();
         var visited = new bool[Width, Height];
         var queue = new Queue<Point>();
         queue.Enqueue(new Point(x, y));
@@ -104,8 +122,9 @@ public sealed class MapDocument
                 continue;
             }
 
+            var before = layer[point.X, point.Y];
             layer[point.X, point.Y] = replacement;
-            filled++;
+            changes.Add(new TileChange(point.X, point.Y, before, replacement));
 
             EnqueueIfNeeded(point.X - 1, point.Y);
             EnqueueIfNeeded(point.X + 1, point.Y);
@@ -113,7 +132,7 @@ public sealed class MapDocument
             EnqueueIfNeeded(point.X, point.Y + 1);
         }
 
-        return filled;
+        return changes;
 
         void EnqueueIfNeeded(int nextX, int nextY)
         {
