@@ -2,8 +2,15 @@ namespace GameEditor;
 
 public sealed class MainForm : Form
 {
+    private const int InitialTileSize = 32;
+
     private readonly ToolStripStatusLabel statusLabel = new();
     private readonly MapViewport mapViewport = new();
+    private readonly TilePaletteControl tilePalette = new();
+    private readonly MapDocument mapDocument = new(40, 30, InitialTileSize);
+    private readonly ListView properties = new();
+
+    private TileSet? tileSet;
 
     public MainForm()
     {
@@ -23,7 +30,22 @@ public sealed class MainForm : Form
         Controls.Add(menu);
 
         MainMenuStrip = menu;
+        tilePalette.SelectedTileChanged += (_, _) => UpdateSelectedTile();
+        mapViewport.TilePlaced += (_, point) => statusLabel.Text = $"配置: ({point.X}, {point.Y}) / Tile {mapViewport.SelectedTileId}";
+        Load += (_, _) => LoadSampleTileset();
+
+        mapViewport.Document = mapDocument;
         statusLabel.Text = "Ready";
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            tileSet?.Dispose();
+        }
+
+        base.Dispose(disposing);
     }
 
     private MenuStrip BuildMenu()
@@ -112,13 +134,7 @@ public sealed class MainForm : Form
             TextAlign = ContentAlignment.MiddleLeft
         };
 
-        var list = new ListBox
-        {
-            Dock = DockStyle.Fill
-        };
-        list.Items.Add("Tileset: 未読み込み");
-
-        panel.Controls.Add(list);
+        panel.Controls.Add(tilePalette);
         panel.Controls.Add(title);
 
         return panel;
@@ -156,21 +172,88 @@ public sealed class MainForm : Form
             TextAlign = ContentAlignment.MiddleLeft
         };
 
-        var properties = new ListView
-        {
-            Dock = DockStyle.Fill,
-            View = View.Details,
-            FullRowSelect = true
-        };
+        properties.Dock = DockStyle.Fill;
+        properties.View = View.Details;
+        properties.FullRowSelect = true;
         properties.Columns.Add("項目", 120);
         properties.Columns.Add("値", 160);
-        properties.Items.Add(new ListViewItem(new[] { "エディタ", "マップ" }));
-        properties.Items.Add(new ListViewItem(new[] { "サイズ", "未設定" }));
-        properties.Items.Add(new ListViewItem(new[] { "レイヤー", "未設定" }));
+        RefreshProperties();
 
         panel.Controls.Add(properties);
         panel.Controls.Add(title);
 
         return panel;
+    }
+
+    private void LoadSampleTileset()
+    {
+        try
+        {
+            var path = ResolveResourcePath("resources", "image", "sample.bmp");
+            tileSet = TileSet.Load(path, InitialTileSize);
+            tilePalette.TileSet = tileSet;
+            mapViewport.TileSet = tileSet;
+            UpdateSelectedTile();
+            RefreshProperties();
+            statusLabel.Text = $"Tileset loaded: {tileSet.Columns}x{tileSet.Rows}, {tileSet.TileSize}px";
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Tileset load error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            statusLabel.Text = "Tileset load failed";
+        }
+    }
+
+    private void UpdateSelectedTile()
+    {
+        mapViewport.SelectedTileId = tilePalette.SelectedTileId;
+        RefreshProperties();
+
+        if (tileSet is not null)
+        {
+            statusLabel.Text = $"選択中: Tile {tilePalette.SelectedTileId}";
+        }
+    }
+
+    private void RefreshProperties()
+    {
+        properties.Items.Clear();
+        properties.Items.Add(new ListViewItem(new[] { "エディタ", "マップ" }));
+        properties.Items.Add(new ListViewItem(new[] { "マップサイズ", $"{mapDocument.Width}x{mapDocument.Height}" }));
+        properties.Items.Add(new ListViewItem(new[] { "チップサイズ", $"{mapDocument.TileSize}x{mapDocument.TileSize}" }));
+        properties.Items.Add(new ListViewItem(new[] { "レイヤー", "1" }));
+        properties.Items.Add(new ListViewItem(new[] { "選択チップ", tilePalette.SelectedTileId.ToString() }));
+
+        if (tileSet is not null)
+        {
+            properties.Items.Add(new ListViewItem(new[] { "タイルセット", $"{tileSet.Columns}x{tileSet.Rows}" }));
+            properties.Items.Add(new ListViewItem(new[] { "画像", Path.GetFileName(tileSet.SourcePath) }));
+        }
+    }
+
+    private static string ResolveResourcePath(params string[] segments)
+    {
+        var candidates = new List<string>
+        {
+            Path.Combine(new[] { AppContext.BaseDirectory }.Concat(segments).ToArray()),
+            Path.Combine(new[] { Environment.CurrentDirectory }.Concat(segments).ToArray())
+        };
+
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            candidates.Add(Path.Combine(new[] { directory.FullName }.Concat(segments).ToArray()));
+            directory = directory.Parent;
+        }
+
+        foreach (var candidate in candidates)
+        {
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        throw new FileNotFoundException($"Resource not found: {Path.Combine(segments)}");
     }
 }
