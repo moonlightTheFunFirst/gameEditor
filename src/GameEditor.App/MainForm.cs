@@ -125,6 +125,17 @@ public sealed class MainForm : Form
         base.Dispose(disposing);
     }
 
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        if (!ConfirmCloseDocuments(EnumerateDocuments().ToList()))
+        {
+            e.Cancel = true;
+            return;
+        }
+
+        base.OnFormClosing(e);
+    }
+
     private MenuStrip BuildMenu()
     {
         var menu = new MenuStrip();
@@ -498,6 +509,12 @@ public sealed class MainForm : Form
         using var dialog = new NewProjectDialog();
         if (dialog.ShowDialog(this) != DialogResult.OK)
         {
+            return;
+        }
+
+        if (!CloseStandaloneMapsForProjectSwitch())
+        {
+            statusLabel.Text = "プロジェクト作成をキャンセルしました";
             return;
         }
 
@@ -1118,13 +1135,7 @@ public sealed class MainForm : Form
             return;
         }
 
-        if (document.FilePath is null)
-        {
-            SaveMapAs();
-            return;
-        }
-
-        SaveMapTo(document, document.FilePath);
+        TrySaveMap(document);
     }
 
     private void SaveMapAs()
@@ -1136,6 +1147,18 @@ public sealed class MainForm : Form
             return;
         }
 
+        TrySaveMapAs(document);
+    }
+
+    private bool TrySaveMap(MapEditorDocument document)
+    {
+        return document.FilePath is null
+            ? TrySaveMapAs(document)
+            : SaveMapTo(document, document.FilePath);
+    }
+
+    private bool TrySaveMapAs(MapEditorDocument document)
+    {
         using var dialog = new SaveFileDialog
         {
             AddExtension = true,
@@ -1147,11 +1170,19 @@ public sealed class MainForm : Form
 
         if (dialog.ShowDialog(this) != DialogResult.OK)
         {
-            return;
+            return false;
         }
 
+        var oldPath = document.FilePath;
         document.FilePath = dialog.FileName;
-        SaveMapTo(document, document.FilePath);
+        if (SaveMapTo(document, document.FilePath))
+        {
+            return true;
+        }
+
+        document.FilePath = oldPath;
+        RefreshProperties();
+        return false;
     }
 
     private void ExportCurrentMap()
@@ -1189,7 +1220,7 @@ public sealed class MainForm : Form
         }
     }
 
-    private void SaveMapTo(MapEditorDocument document, string path)
+    private bool SaveMapTo(MapEditorDocument document, string path)
     {
         try
         {
@@ -1198,12 +1229,63 @@ public sealed class MainForm : Form
             UpdateDocumentTabTitle(document);
             statusLabel.Text = $"保存しました: {Path.GetFileName(path)}";
             RefreshProperties();
+            return true;
         }
         catch (Exception ex)
         {
             MessageBox.Show(this, ex.Message, "Save error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             statusLabel.Text = "Save failed";
+            return false;
         }
+    }
+
+    private bool ConfirmCloseDocuments(IReadOnlyList<MapEditorDocument> documents)
+    {
+        foreach (var document in documents)
+        {
+            if (!ConfirmCloseDocument(document))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool ConfirmCloseDocument(MapEditorDocument document)
+    {
+        if (!document.IsDirty)
+        {
+            return true;
+        }
+
+        var result = MessageBox.Show(
+            this,
+            $"マップ「{document.Name}」は保存されていません。保存しますか？",
+            "保存確認",
+            MessageBoxButtons.YesNoCancel,
+            MessageBoxIcon.Warning);
+
+        return result switch
+        {
+            DialogResult.Yes => TrySaveMap(document),
+            DialogResult.No => true,
+            _ => false
+        };
+    }
+
+    private bool CloseStandaloneMapsForProjectSwitch()
+    {
+        var standaloneDocuments = EnumerateDocuments()
+            .Where(IsStandaloneDocument)
+            .ToList();
+
+        return CloseDocuments(standaloneDocuments, promptForSave: true);
+    }
+
+    private bool IsStandaloneDocument(MapEditorDocument document)
+    {
+        return currentProject?.Maps.Any(item => ReferenceEquals(item.Document, document)) != true;
     }
 
     private void CloseCurrentMap()
@@ -1215,9 +1297,41 @@ public sealed class MainForm : Form
             return;
         }
 
+        CloseDocuments([document], promptForSave: true);
+    }
+
+    private bool CloseDocuments(IReadOnlyList<MapEditorDocument> documents, bool promptForSave)
+    {
+        if (documents.Count == 0)
+        {
+            return true;
+        }
+
+        if (promptForSave && !ConfirmCloseDocuments(documents))
+        {
+            return false;
+        }
+
+        foreach (var document in documents.ToList())
+        {
+            CloseDocumentWithoutPrompt(document);
+        }
+
+        return true;
+    }
+
+    private void CloseDocumentWithoutPrompt(MapEditorDocument document)
+    {
+        var page = GetDocumentTabPage(document);
+        if (page is null)
+        {
+            return;
+        }
+
         var closedName = document.Name;
-        var closingIndex = mapTabs.SelectedIndex;
+        var closingIndex = mapTabs.TabPages.IndexOf(page);
         var nextPage = GetNextMapTabPage(closingIndex);
+        var isSelectedPage = ReferenceEquals(mapTabs.SelectedTab, page);
         var wasProjectMap = currentProject?.Maps.Any(item => ReferenceEquals(item.Document, document)) == true;
 
         suppressDocumentActivation = true;
@@ -1227,7 +1341,7 @@ public sealed class MainForm : Form
         mapTabs.SuspendLayout();
         try
         {
-            if (nextPage is not null)
+            if (isSelectedPage && nextPage is not null)
             {
                 mapTabs.SelectedTab = nextPage;
             }
@@ -1253,6 +1367,19 @@ public sealed class MainForm : Form
         }
 
         statusLabel.Text = $"閉じました: {closedName}";
+    }
+
+    private TabPage? GetDocumentTabPage(MapEditorDocument document)
+    {
+        foreach (TabPage page in mapTabs.TabPages)
+        {
+            if (ReferenceEquals(page.Tag, document))
+            {
+                return page;
+            }
+        }
+
+        return null;
     }
 
     private TabPage? GetNextMapTabPage(int closingIndex)
