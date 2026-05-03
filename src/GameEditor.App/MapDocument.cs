@@ -27,6 +27,18 @@ public sealed class MapDocument
         TileSize = tileSize;
         baseTiles = new TilePlacement[width, height];
         advancedTiles = new TilePlacement[width, height];
+        AttributeLists =
+        [
+            new AttributeListDefinition(
+                "default",
+                "Default",
+                [
+                    new AttributeDefinition(0, "None", Color.Transparent),
+                    new AttributeDefinition(1, "Blocked", Color.FromArgb(160, 220, 50, 50)),
+                    new AttributeDefinition(2, "Event", Color.FromArgb(160, 80, 160, 255))
+                ])
+        ];
+        ActiveAttributeListId = "default";
 
         Clear();
     }
@@ -38,6 +50,13 @@ public sealed class MapDocument
     public int TileSize { get; }
 
     public Size PixelSize => new(Width * TileSize, Height * TileSize);
+
+    public List<AttributeListDefinition> AttributeLists { get; set; }
+
+    public string? ActiveAttributeListId { get; set; }
+
+    public AttributeListDefinition? ActiveAttributeList => AttributeLists.FirstOrDefault(list => list.Id == ActiveAttributeListId)
+        ?? AttributeLists.FirstOrDefault();
 
     public TilePlacement GetTile(TileSetKind kind, int x, int y)
     {
@@ -92,6 +111,30 @@ public sealed class MapDocument
 
         layer[x, y] = placement;
         return new TileChange(x, y, before, placement);
+    }
+
+    public AttributeChange? SetAttributeWithChange(TileSetKind kind, int x, int y, int? attributeValue)
+    {
+        if (!IsInside(x, y))
+        {
+            return null;
+        }
+
+        var layer = GetLayer(kind);
+        var before = layer[x, y];
+        if (before.IsEmpty)
+        {
+            return null;
+        }
+
+        var after = before.WithAttribute(attributeValue);
+        if (before == after)
+        {
+            return null;
+        }
+
+        layer[x, y] = after;
+        return new AttributeChange(x, y, before, after);
     }
 
     public IReadOnlyList<TileChange> FloodFillWithChanges(TileSetKind kind, int x, int y, TilePlacement replacement)

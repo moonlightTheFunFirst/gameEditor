@@ -45,6 +45,7 @@ public static class MapSerializer
 
         var tileSets = LoadTileSets(basePath, mapFile);
         var document = new MapDocument(mapFile.Map.Width, mapFile.Map.Height, mapFile.Map.TileSize);
+        ApplyAttributeLists(document, mapFile);
         ApplyLayers(document, tileSets, mapFile);
 
         return new MapLoadResult(document, tileSets, mapFile.Map.Name);
@@ -70,6 +71,7 @@ public static class MapSerializer
                 TileSize = document.TileSize
             },
             TileSets = tileSets.Select(CreateTileSet).ToList(),
+            AttributeLists = document.AttributeLists.Select(CreateAttributeList).ToList(),
             Layers =
             [
                 CreateLayer(document, tileSets, TileSetKind.Base, "base", "ベース", 0),
@@ -87,7 +89,24 @@ public static class MapSerializer
             Kind = GetKindId(tileSet.Kind),
             Image = tileSet.ImagePath,
             TileSize = tileSet.TileSize,
-            TransparentColor = ToHexColor(tileSet.TransparentColor)
+            TransparentColor = ToHexColor(tileSet.TransparentColor),
+            AttributeListId = tileSet.AttributeListId,
+            TileAttributes = tileSet.TileAttributes.ToDictionary()
+        };
+    }
+
+    private static MapFileAttributeList CreateAttributeList(AttributeListDefinition list)
+    {
+        return new MapFileAttributeList
+        {
+            Id = list.Id,
+            Name = list.Name,
+            Values = list.Values.Select(value => new MapFileAttributeValue
+            {
+                Value = value.Value,
+                Name = value.Name,
+                Color = ToHexColor(value.Color)
+            }).ToList()
         };
     }
 
@@ -114,7 +133,8 @@ public static class MapSerializer
                 X = x,
                 Y = y,
                 TileSetId = tileSet.Id,
-                TileId = placement.TileId
+                TileId = placement.TileId,
+                Attribute = placement.AttributeValue
             });
         }
 
@@ -167,10 +187,29 @@ public static class MapSerializer
                 imagePath,
                 tileSetFile.Image,
                 tileSize,
-                ParseHexColor(tileSetFile.TransparentColor)));
+                ParseHexColor(tileSetFile.TransparentColor),
+                tileSetFile.AttributeListId,
+                tileSetFile.TileAttributes.ToDictionary()));
         }
 
         return tileSets;
+    }
+
+    private static void ApplyAttributeLists(MapDocument document, MapFile mapFile)
+    {
+        if (mapFile.AttributeLists.Count == 0)
+        {
+            return;
+        }
+
+        document.AttributeLists = mapFile.AttributeLists.Select(list => new AttributeListDefinition(
+            list.Id,
+            list.Name,
+            list.Values.Select(value => new AttributeDefinition(
+                value.Value,
+                value.Name,
+                ParseHexColor(value.Color) ?? Color.Transparent)).ToList())).ToList();
+        document.ActiveAttributeListId = document.AttributeLists.FirstOrDefault()?.Id;
     }
 
     private static void ApplyLayers(MapDocument document, IReadOnlyList<TileSet> tileSets, MapFile mapFile)
@@ -193,7 +232,7 @@ public static class MapSerializer
                     continue;
                 }
 
-                document.SetTile(layerKind, tile.X, tile.Y, new TilePlacement(tileSet.Index, tile.TileId));
+                document.SetTile(layerKind, tile.X, tile.Y, new TilePlacement(tileSet.Index, tile.TileId, tile.Attribute));
             }
         }
     }

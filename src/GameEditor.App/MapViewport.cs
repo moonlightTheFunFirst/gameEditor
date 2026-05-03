@@ -9,6 +9,7 @@ public sealed class MapViewport : ScrollableControl
     private MouseButtons activeMouseButton;
     private Point? lastEditedCell;
     private readonly List<TileChange> pendingStrokeChanges = [];
+    private readonly List<AttributeChange> pendingAttributeChanges = [];
     private MapEditTool pendingStrokeTool;
     private TileSetKind? pendingStrokeLayerKind;
 
@@ -82,6 +83,10 @@ public sealed class MapViewport : ScrollableControl
         }
     }
 
+    [System.ComponentModel.Browsable(false)]
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public int? SelectedAttributeValue { get; set; }
+
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
@@ -98,6 +103,7 @@ public sealed class MapViewport : ScrollableControl
 
         e.Graphics.TranslateTransform(AutoScrollPosition.X, AutoScrollPosition.Y);
         DrawPlacedTiles(e.Graphics);
+        DrawAttributeOverlay(e.Graphics);
         DrawGrid(e.Graphics);
     }
 
@@ -150,7 +156,7 @@ public sealed class MapViewport : ScrollableControl
         }
 
         var tool = ResolveTool(button);
-        if (isDrag && tool != MapEditTool.Pen && tool != MapEditTool.Eraser)
+        if (isDrag && tool != MapEditTool.Pen && tool != MapEditTool.Eraser && tool != MapEditTool.Attribute)
         {
             return;
         }
@@ -166,6 +172,10 @@ public sealed class MapViewport : ScrollableControl
                 else if (tool == MapEditTool.Eraser)
                 {
                     ApplyEraser(lineCell);
+                }
+                else if (tool == MapEditTool.Attribute)
+                {
+                    ApplyAttribute(lineCell);
                 }
             }
 
@@ -188,6 +198,9 @@ public sealed class MapViewport : ScrollableControl
 
                 break;
             case MapEditTool.Select:
+                break;
+            case MapEditTool.Attribute:
+                ApplyAttribute(cell);
                 break;
         }
     }
@@ -215,7 +228,7 @@ public sealed class MapViewport : ScrollableControl
             return;
         }
 
-        var placement = new TilePlacement(selectedTileSet.Index, selectedTileId);
+        var placement = new TilePlacement(selectedTileSet.Index, selectedTileId, selectedTileSet.GetDefaultAttribute(selectedTileId));
         var current = document.GetTile(selectedTileSet.Kind, cell.X, cell.Y);
         if (current == placement)
         {
@@ -270,7 +283,7 @@ public sealed class MapViewport : ScrollableControl
             return;
         }
 
-        var placement = new TilePlacement(selectedTileSet.Index, selectedTileId);
+        var placement = new TilePlacement(selectedTileSet.Index, selectedTileId, selectedTileSet.GetDefaultAttribute(selectedTileId));
         var changes = document.FloodFillWithChanges(selectedTileSet.Kind, cell.X, cell.Y, placement);
         if (changes.Count == 0)
         {
@@ -286,9 +299,30 @@ public sealed class MapViewport : ScrollableControl
         EditApplied?.Invoke(this, new MapEditAppliedEventArgs(MapEditTool.Fill, selectedTileSet.Kind, cell, changes.Count));
     }
 
+    private void ApplyAttribute(Point cell)
+    {
+        if (document is null || selectedTileSet is null)
+        {
+            return;
+        }
+
+        var change = document.SetAttributeWithChange(selectedTileSet.Kind, cell.X, cell.Y, SelectedAttributeValue);
+        if (change is null)
+        {
+            lastEditedCell = cell;
+            return;
+        }
+
+        AddAttributeStrokeChange(change.Value);
+        lastEditedCell = cell;
+        Invalidate(GetInvalidationRectangle(cell.X, cell.Y));
+        EditApplied?.Invoke(this, new MapEditAppliedEventArgs(MapEditTool.Attribute, selectedTileSet.Kind, cell, 1));
+    }
+
     private void BeginStroke(MapEditTool tool)
     {
         pendingStrokeChanges.Clear();
+        pendingAttributeChanges.Clear();
         pendingStrokeTool = tool;
         pendingStrokeLayerKind = selectedTileSet?.Kind;
     }
@@ -303,18 +337,41 @@ public sealed class MapViewport : ScrollableControl
         pendingStrokeChanges.Add(change);
     }
 
+    private void AddAttributeStrokeChange(AttributeChange change)
+    {
+        if (pendingStrokeLayerKind is null)
+        {
+            pendingStrokeLayerKind = selectedTileSet?.Kind;
+        }
+
+        pendingAttributeChanges.Add(change);
+    }
+
     private void CommitStroke()
     {
-        if (pendingStrokeLayerKind is not { } layerKind || pendingStrokeChanges.Count == 0)
+        if (pendingStrokeLayerKind is not { } layerKind)
         {
             pendingStrokeChanges.Clear();
+            pendingAttributeChanges.Clear();
             return;
         }
 
-        EditCommandCommitted?.Invoke(
-            this,
-            new TileEditCommand(GetCommandName(pendingStrokeTool), layerKind, pendingStrokeChanges.ToArray()));
+        if (pendingStrokeChanges.Count > 0)
+        {
+            EditCommandCommitted?.Invoke(
+                this,
+                new TileEditCommand(GetCommandName(pendingStrokeTool), layerKind, pendingStrokeChanges.ToArray()));
+        }
+
+        if (pendingAttributeChanges.Count > 0)
+        {
+            EditCommandCommitted?.Invoke(
+                this,
+                new AttributeEditCommand(GetCommandName(pendingStrokeTool), layerKind, pendingAttributeChanges.ToArray()));
+        }
+
         pendingStrokeChanges.Clear();
+        pendingAttributeChanges.Clear();
     }
 
     private Point GetCellFromLocation(Point location)
@@ -342,6 +399,7 @@ public sealed class MapViewport : ScrollableControl
             MapEditTool.Fill => "塗りつぶし",
             MapEditTool.Eraser => "消しゴム",
             MapEditTool.Select => "選択",
+            MapEditTool.Attribute => "Attribute",
             _ => tool.ToString()
         };
     }
@@ -413,6 +471,51 @@ public sealed class MapViewport : ScrollableControl
                 tileSet.DrawTile(graphics, placement.TileId, destination);
             }
         }
+    }
+
+    private void DrawAttributeOverlay(Graphics graphics)
+    {
+        if (document is null || document.ActiveAttributeList is not { } list)
+        {
+            return;
+        }
+
+        for (var y = 0; y < document.Height; y++)
+        {
+            for (var x = 0; x < document.Width; x++)
+            {
+                DrawAttributeCell(graphics, TileSetKind.Base, x, y, list);
+                DrawAttributeCell(graphics, TileSetKind.Advanced, x, y, list);
+            }
+        }
+    }
+
+    private void DrawAttributeCell(Graphics graphics, TileSetKind kind, int x, int y, AttributeListDefinition list)
+    {
+        if (document is null)
+        {
+            return;
+        }
+
+        var placement = document.GetTile(kind, x, y);
+        if (placement.AttributeValue is not { } attributeValue || attributeValue == 0)
+        {
+            return;
+        }
+
+        var color = list.FindValue(attributeValue)?.Color ?? Color.FromArgb(120, 255, 220, 40);
+        if (color.A == 0)
+        {
+            color = Color.FromArgb(120, color.R, color.G, color.B);
+        }
+
+        using var brush = new SolidBrush(Color.FromArgb(Math.Min((int)color.A, 120), color.R, color.G, color.B));
+        graphics.FillRectangle(
+            brush,
+            x * document.TileSize,
+            y * document.TileSize,
+            document.TileSize,
+            document.TileSize);
     }
 
     private void DrawGrid(Graphics graphics)

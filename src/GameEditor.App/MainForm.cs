@@ -34,6 +34,10 @@ public sealed class MainForm : Form
     private readonly ToolStripButton fillToolButton = new("塗りつぶし");
     private readonly ToolStripButton eraserToolButton = new("消しゴム");
     private readonly ToolStripButton selectToolButton = new("選択");
+    private readonly ToolStripButton attributeToolButton = new("属性");
+    private readonly ToolStripComboBox attributeValueSelector = new();
+    private readonly ToolStripButton setTileAttributeButton = new("チップ属性");
+    private readonly ToolStripButton editAttributeListsButton = new("属性リスト");
     private readonly ToolStripButton undoButton = new("元に戻す");
     private readonly ToolStripButton redoButton = new("やり直し");
     private readonly ToolStripMenuItem undoMenuItem = new("元に戻す");
@@ -286,6 +290,16 @@ public sealed class MainForm : Form
         mapToolStripItems.Add(ConfigureToolButton(fillToolButton, MapEditTool.Fill));
         mapToolStripItems.Add(ConfigureToolButton(eraserToolButton, MapEditTool.Eraser));
         mapToolStripItems.Add(ConfigureToolButton(selectToolButton, MapEditTool.Select));
+        mapToolStripItems.Add(ConfigureToolButton(attributeToolButton, MapEditTool.Attribute));
+        mapToolStripItems.Add(new ToolStripSeparator());
+        attributeValueSelector.DropDownStyle = ComboBoxStyle.DropDownList;
+        attributeValueSelector.Width = 140;
+        attributeValueSelector.SelectedIndexChanged += (_, _) => UpdateSelectedAttributeValue();
+        setTileAttributeButton.Click += (_, _) => SetSelectedTileDefaultAttribute();
+        editAttributeListsButton.Click += (_, _) => EditAttributeLists();
+        mapToolStripItems.Add(attributeValueSelector);
+        mapToolStripItems.Add(setTileAttributeButton);
+        mapToolStripItems.Add(editAttributeListsButton);
 
         foreach (var item in mapToolStripItems)
         {
@@ -1049,6 +1063,7 @@ public sealed class MainForm : Form
         advancedPalette.TileSet = document.GetTileSet(TileSetKind.Advanced);
         activePalette = tileSetTabs.SelectedIndex == 1 ? advancedPalette : basePalette;
         document.Viewport.TileSets = document.TileSets;
+        RefreshAttributeValueSelector(document);
         SyncCurrentViewportSelection();
         Text = $"gameEditor - {document.Name}";
         UpdateMapWorkspaceState();
@@ -1084,8 +1099,111 @@ public sealed class MainForm : Form
 
         viewport.SelectedTileSet = tileSet;
         viewport.SelectedTileId = activePalette.SelectedTileId;
+        viewport.SelectedAttributeValue = GetSelectedAttributeValue();
         viewport.EditTool = currentEditTool;
         viewport.SecondaryEditTool = currentSecondaryEditTool;
+    }
+
+    private void RefreshAttributeValueSelector(MapEditorDocument? document)
+    {
+        var previous = GetSelectedAttributeValue();
+        attributeValueSelector.Items.Clear();
+
+        var list = document?.Map.ActiveAttributeList;
+        if (list is null)
+        {
+            return;
+        }
+
+        foreach (var value in list.Values.OrderBy(value => value.Value))
+        {
+            attributeValueSelector.Items.Add(new AttributeValueSelectorItem(value.Value, value.Name));
+        }
+
+        var selectedIndex = 0;
+        for (var i = 0; i < attributeValueSelector.Items.Count; i++)
+        {
+            if (attributeValueSelector.Items[i] is AttributeValueSelectorItem item && item.Value == previous)
+            {
+                selectedIndex = i;
+                break;
+            }
+        }
+
+        if (attributeValueSelector.Items.Count > 0)
+        {
+            attributeValueSelector.SelectedIndex = selectedIndex;
+        }
+    }
+
+    private int? GetSelectedAttributeValue()
+    {
+        return attributeValueSelector.SelectedItem is AttributeValueSelectorItem item ? item.Value : null;
+    }
+
+    private void UpdateSelectedAttributeValue()
+    {
+        SyncCurrentViewportSelection();
+        RefreshProperties();
+    }
+
+    private void EditAttributeLists()
+    {
+        var document = CurrentDocument;
+        if (document is null)
+        {
+            return;
+        }
+
+        using var dialog = new AttributeListEditorDialog(document.Map.AttributeLists);
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        document.Map.AttributeLists = dialog.AttributeLists
+            .Select(list => new AttributeListDefinition(
+                list.Id,
+                list.Name,
+                list.Values.Select(value => new AttributeDefinition(value.Value, value.Name, value.Color)).ToList()))
+            .ToList();
+        document.Map.ActiveAttributeListId = document.Map.AttributeLists.FirstOrDefault()?.Id;
+        foreach (var tileSet in document.TileSets)
+        {
+            tileSet.AttributeListId = document.Map.ActiveAttributeListId;
+        }
+
+        document.IsDirty = true;
+        MarkProjectDirtyForDocument(document);
+        UpdateDocumentTabTitle(document);
+        RefreshAttributeValueSelector(document);
+        SyncCurrentViewportSelection();
+        RefreshProperties();
+    }
+
+    private void SetSelectedTileDefaultAttribute()
+    {
+        var document = CurrentDocument;
+        if (document is null || activePalette?.TileSet is not { } tileSet || activePalette.SelectedTileId < 0)
+        {
+            return;
+        }
+
+        tileSet.AttributeListId = document.Map.ActiveAttributeListId;
+        tileSet.SetDefaultAttribute(activePalette.SelectedTileId, GetSelectedAttributeValue());
+        document.IsDirty = true;
+        MarkProjectDirtyForDocument(document);
+        UpdateDocumentTabTitle(document);
+        RefreshProperties();
+        statusLabel.Text = $"Tile {activePalette.SelectedTileId} attribute set";
+    }
+
+    private sealed record AttributeValueSelectorItem(int Value, string Name)
+    {
+        public override string ToString()
+        {
+            return string.IsNullOrWhiteSpace(Name) ? Value.ToString() : $"{Value}: {Name}";
+        }
     }
 
     private void ShowMapTabContextMenu(object? sender, MouseEventArgs e)
@@ -1184,7 +1302,17 @@ public sealed class MainForm : Form
 
     private void ReplaceDocumentTileSet(MapEditorDocument document, TileSetDefinition definition, bool markDirty)
     {
+        var current = document.GetTileSet(definition.Kind);
         var replacement = CreateTileSet(definition, GetTileSetIndex(definition.Kind), document.Map.TileSize);
+        if (current is not null)
+        {
+            replacement.AttributeListId = current.AttributeListId;
+            foreach (var (tileId, value) in current.TileAttributes)
+            {
+                replacement.SetDefaultAttribute(tileId, value);
+            }
+        }
+
         document.ReplaceTileSet(definition.Kind, replacement);
 
         if (markDirty)
@@ -1883,6 +2011,7 @@ public sealed class MainForm : Form
         fillToolButton.Checked = currentEditTool == MapEditTool.Fill;
         eraserToolButton.Checked = currentEditTool == MapEditTool.Eraser;
         selectToolButton.Checked = currentEditTool == MapEditTool.Select;
+        attributeToolButton.Checked = currentEditTool == MapEditTool.Attribute;
     }
 
     private ToolStripButton ConfigureToolButton(ToolStripButton button, MapEditTool tool)
@@ -1906,6 +2035,10 @@ public sealed class MainForm : Form
         fillToolButton.Enabled = hasDocument;
         eraserToolButton.Enabled = hasDocument;
         selectToolButton.Enabled = hasDocument;
+        attributeToolButton.Enabled = hasDocument;
+        attributeValueSelector.Enabled = hasDocument;
+        setTileAttributeButton.Enabled = hasDocument;
+        editAttributeListsButton.Enabled = hasDocument;
         RefreshProperties();
     }
 
@@ -1935,12 +2068,15 @@ public sealed class MainForm : Form
         properties.Items.Add(new ListViewItem(new[] { "Undo", document.History.CanUndo ? "可" : "不可" }));
         properties.Items.Add(new ListViewItem(new[] { "Redo", document.History.CanRedo ? "可" : "不可" }));
         properties.Items.Add(new ListViewItem(new[] { "選択チップ", selectedTileId.ToString() }));
+        properties.Items.Add(new ListViewItem(new[] { "属性リスト", document.Map.ActiveAttributeList?.Name ?? "未設定" }));
+        properties.Items.Add(new ListViewItem(new[] { "選択属性", GetSelectedAttributeValue()?.ToString() ?? "未設定" }));
 
         if (tileSet is not null)
         {
             properties.Items.Add(new ListViewItem(new[] { "タイルセット", $"{tileSet.Name} {tileSet.Columns}x{tileSet.Rows}" }));
             properties.Items.Add(new ListViewItem(new[] { "画像", tileSet.ImagePath }));
             properties.Items.Add(new ListViewItem(new[] { "透過色", tileSet.TransparentColor is null ? "なし" : "#FF00FF" }));
+            properties.Items.Add(new ListViewItem(new[] { "チップ既定属性", selectedTileId >= 0 ? tileSet.GetDefaultAttribute(selectedTileId)?.ToString() ?? "未設定" : "未設定" }));
         }
 
         properties.Items.Add(new ListViewItem(new[] { "保存先", document.FilePath is null ? "未保存" : Path.GetFileName(document.FilePath) }));
@@ -2016,6 +2152,7 @@ public sealed class MainForm : Form
             MapEditTool.Fill => "塗りつぶし",
             MapEditTool.Eraser => "消しゴム",
             MapEditTool.Select => "選択",
+            MapEditTool.Attribute => "属性",
             _ => tool.ToString()
         };
     }

@@ -11,7 +11,9 @@ public sealed class TileSet : IDisposable
         string sourcePath,
         string imagePath,
         int tileSize,
-        Color? transparentColor)
+        Color? transparentColor,
+        string? attributeListId,
+        Dictionary<int, int> tileAttributes)
     {
         Index = index;
         Id = id;
@@ -22,6 +24,8 @@ public sealed class TileSet : IDisposable
         ImagePath = imagePath;
         TileSize = tileSize;
         TransparentColor = transparentColor;
+        AttributeListId = attributeListId;
+        TileAttributes = tileAttributes;
         Columns = image.Width / tileSize;
         Rows = image.Height / tileSize;
     }
@@ -44,6 +48,10 @@ public sealed class TileSet : IDisposable
 
     public Color? TransparentColor { get; }
 
+    public string? AttributeListId { get; set; }
+
+    public Dictionary<int, int> TileAttributes { get; }
+
     public int Columns { get; }
 
     public int Rows { get; }
@@ -58,7 +66,9 @@ public sealed class TileSet : IDisposable
         string path,
         string imagePath,
         int tileSize,
-        Color? transparentColor = null)
+        Color? transparentColor = null,
+        string? attributeListId = null,
+        Dictionary<int, int>? tileAttributes = null)
     {
         if (tileSize <= 0)
         {
@@ -74,7 +84,39 @@ public sealed class TileSet : IDisposable
             throw new InvalidOperationException($"Tileset size must be divisible by {tileSize}. Actual: {source.Width}x{source.Height}");
         }
 
-        return new TileSet(index, id, name, kind, image, path, imagePath, tileSize, transparentColor);
+        return new TileSet(
+            index,
+            id,
+            name,
+            kind,
+            image,
+            path,
+            imagePath,
+            tileSize,
+            transparentColor,
+            attributeListId,
+            tileAttributes ?? []);
+    }
+
+    public int? GetDefaultAttribute(int tileId)
+    {
+        return TileAttributes.TryGetValue(tileId, out var value) ? value : null;
+    }
+
+    public void SetDefaultAttribute(int tileId, int? value)
+    {
+        if (tileId < 0 || tileId >= TileCount)
+        {
+            return;
+        }
+
+        if (value is null)
+        {
+            TileAttributes.Remove(tileId);
+            return;
+        }
+
+        TileAttributes[tileId] = value.Value;
     }
 
     public Rectangle GetSourceRectangle(int tileId)

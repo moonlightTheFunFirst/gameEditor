@@ -11,6 +11,8 @@ public sealed class MapFile
 
     public List<MapFileTileSet> TileSets { get; set; } = [];
 
+    public List<MapFileAttributeList> AttributeLists { get; set; } = [];
+
     public List<MapFileLayer> Layers { get; set; } = [];
 
     [JsonExtensionData]
@@ -65,6 +67,10 @@ public sealed class MapFileTileSet
 
     public string? TransparentColor { get; set; }
 
+    public string? AttributeListId { get; set; }
+
+    public Dictionary<int, int> TileAttributes { get; set; } = [];
+
     public Dictionary<string, object?> Attributes { get; set; } = [];
 
     [JsonExtensionData]
@@ -103,7 +109,33 @@ public sealed class MapFileTile
 
     public int TileId { get; set; }
 
+    public int? Attribute { get; set; }
+
     public Dictionary<string, object?> Attributes { get; set; } = [];
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; set; }
+}
+
+public sealed class MapFileAttributeList
+{
+    public string Id { get; set; } = "";
+
+    public string Name { get; set; } = "";
+
+    public List<MapFileAttributeValue> Values { get; set; } = [];
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; set; }
+}
+
+public sealed class MapFileAttributeValue
+{
+    public int Value { get; set; }
+
+    public string Name { get; set; } = "";
+
+    public string? Color { get; set; }
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; set; }
