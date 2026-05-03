@@ -127,7 +127,16 @@ public sealed class MainForm : Form
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
-        if (!ConfirmCloseDocuments(EnumerateDocuments().ToList()))
+        if (!ConfirmCloseProjectIfNeeded())
+        {
+            e.Cancel = true;
+            return;
+        }
+
+        var standaloneDocuments = EnumerateDocuments()
+            .Where(IsStandaloneDocument)
+            .ToList();
+        if (!ConfirmCloseDocuments(standaloneDocuments))
         {
             e.Cancel = true;
             return;
@@ -147,6 +156,7 @@ public sealed class MainForm : Form
         newMenu.DropDownItems.Add("アニメ", null, (_, _) => ShowComingSoon("アニメエディタ"));
 
         var openMenu = new ToolStripMenuItem("開く");
+        openMenu.DropDownItems.Add("プロジェクト", null, (_, _) => OpenProject());
         openMenu.DropDownItems.Add("マップ", null, (_, _) => OpenMap());
 
         var importMenu = new ToolStripMenuItem("インポート");
@@ -159,6 +169,9 @@ public sealed class MainForm : Form
         fileMenu.DropDownItems.Add(openMenu);
         fileMenu.DropDownItems.Add("保存", null, (_, _) => SaveMap());
         fileMenu.DropDownItems.Add("名前を付けて保存", null, (_, _) => SaveMapAs());
+        fileMenu.DropDownItems.Add("プロジェクトを保存", null, (_, _) => SaveProject());
+        fileMenu.DropDownItems.Add("プロジェクトに名前を付けて保存", null, (_, _) => SaveProjectAs());
+        fileMenu.DropDownItems.Add("プロジェクトを閉じる", null, (_, _) => CloseProject());
         fileMenu.DropDownItems.Add(importMenu);
         fileMenu.DropDownItems.Add(exportMenu);
         fileMenu.DropDownItems.Add(new ToolStripSeparator());
@@ -512,7 +525,7 @@ public sealed class MainForm : Form
             return;
         }
 
-        if (!CloseStandaloneMapsForProjectSwitch())
+        if (!PrepareForProjectSwitch())
         {
             statusLabel.Text = "プロジェクト作成をキャンセルしました";
             return;
@@ -528,6 +541,61 @@ public sealed class MainForm : Form
 
         ShowEmptyWorkspace("プロジェクトツリーからエディタを選択してください");
         statusLabel.Text = $"新規プロジェクト: {currentProject.Name}";
+    }
+
+    private void OpenProject()
+    {
+        using var dialog = new OpenFileDialog
+        {
+            AddExtension = true,
+            DefaultExt = "geproj.json",
+            Filter = "gameEditor project (*.geproj.json)|*.geproj.json|JSON (*.json)|*.json|All files (*.*)|*.*",
+            Title = "プロジェクトを開く"
+        };
+
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        ProjectLoadResult loaded;
+        try
+        {
+            loaded = ProjectSerializer.Load(dialog.FileName);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Project load error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            statusLabel.Text = "Project load failed";
+            return;
+        }
+
+        if (!PrepareForProjectSwitch())
+        {
+            DisposeProjectDocuments(loaded.Project);
+            statusLabel.Text = "プロジェクト読み込みをキャンセルしました";
+            return;
+        }
+
+        currentProject = loaded.Project;
+        SetProjectPanelVisible(true);
+
+        foreach (var item in currentProject.Maps)
+        {
+            AddDocumentTab(item.Document);
+        }
+
+        RefreshProjectTree(CurrentDocument);
+        if (currentProject.Maps.Count == 0)
+        {
+            ShowEmptyWorkspace("プロジェクトツリーからエディタを選択してください");
+        }
+        else
+        {
+            ShowMapEditorWorkspace(projectContext: true);
+        }
+
+        statusLabel.Text = $"プロジェクトを開きました: {Path.GetFileName(dialog.FileName)}";
     }
 
     private void NewMap()
@@ -657,6 +725,7 @@ public sealed class MainForm : Form
         }
 
         currentProject.Maps.Add(new ProjectMapItem(document));
+        MarkProjectDirty();
         RefreshProjectTree(document);
     }
 
@@ -674,7 +743,47 @@ public sealed class MainForm : Form
         }
 
         currentProject.Maps.Remove(item);
+        MarkProjectDirty();
         RefreshProjectTree(null);
+    }
+
+    private void MarkProjectDirty()
+    {
+        if (currentProject is null)
+        {
+            return;
+        }
+
+        currentProject.IsDirty = true;
+        UpdateProjectTreeRootTitle();
+    }
+
+    private void MarkProjectDirtyForDocument(MapEditorDocument document)
+    {
+        if (currentProject?.Maps.Any(item => ReferenceEquals(item.Document, document)) == true)
+        {
+            MarkProjectDirty();
+        }
+    }
+
+    private string GetProjectDisplayName()
+    {
+        if (currentProject is null)
+        {
+            return "";
+        }
+
+        return currentProject.IsDirty ? $"{currentProject.Name}*" : currentProject.Name;
+    }
+
+    private void UpdateProjectTreeRootTitle()
+    {
+        if (currentProject is null || projectTree.Nodes.Count == 0)
+        {
+            return;
+        }
+
+        projectTree.Nodes[0].Text = GetProjectDisplayName();
     }
 
     private void RefreshProjectTree(MapEditorDocument? selectedDocument)
@@ -688,7 +797,7 @@ public sealed class MainForm : Form
                 return;
             }
 
-            var root = new TreeNode(currentProject.Name)
+            var root = new TreeNode(GetProjectDisplayName())
             {
                 Tag = new ProjectTreeNodeTag(ProjectTreeNodeKind.Project)
             };
@@ -810,6 +919,7 @@ public sealed class MainForm : Form
         {
             document.History.Push(command);
             document.IsDirty = true;
+            MarkProjectDirtyForDocument(document);
             UpdateDocumentTabTitle(document);
             UpdateDocumentActionsState();
         };
@@ -976,6 +1086,7 @@ public sealed class MainForm : Form
         if (markDirty)
         {
             document.IsDirty = true;
+            MarkProjectDirtyForDocument(document);
             UpdateDocumentTabTitle(document);
         }
     }
@@ -1126,6 +1237,108 @@ public sealed class MainForm : Form
         return kind == TileSetKind.Base ? "base" : "advanced";
     }
 
+    private void SaveProject()
+    {
+        if (currentProject is null)
+        {
+            statusLabel.Text = "保存するプロジェクトがありません";
+            return;
+        }
+
+        TrySaveProject(currentProject);
+    }
+
+    private void SaveProjectAs()
+    {
+        if (currentProject is null)
+        {
+            statusLabel.Text = "保存するプロジェクトがありません";
+            return;
+        }
+
+        TrySaveProjectAs(currentProject);
+    }
+
+    private bool TrySaveProject(ProjectDocument project)
+    {
+        return project.FilePath is null
+            ? TrySaveProjectAs(project)
+            : SaveProjectTo(project, project.FilePath);
+    }
+
+    private bool TrySaveProjectAs(ProjectDocument project)
+    {
+        using var dialog = new SaveFileDialog
+        {
+            AddExtension = true,
+            DefaultExt = "geproj.json",
+            FileName = $"{project.Name}.geproj.json",
+            Filter = "gameEditor project (*.geproj.json)|*.geproj.json|JSON (*.json)|*.json|All files (*.*)|*.*",
+            Title = "プロジェクトを保存"
+        };
+
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return false;
+        }
+
+        var oldPath = project.FilePath;
+        project.FilePath = dialog.FileName;
+        if (SaveProjectTo(project, project.FilePath))
+        {
+            return true;
+        }
+
+        project.FilePath = oldPath;
+        RefreshProperties();
+        return false;
+    }
+
+    private bool SaveProjectTo(ProjectDocument project, string path)
+    {
+        try
+        {
+            ProjectSerializer.Save(path, project);
+            project.FilePath = path;
+            project.IsDirty = false;
+
+            foreach (var item in project.Maps)
+            {
+                item.Document.IsDirty = false;
+                UpdateDocumentTabTitle(item.Document);
+            }
+
+            UpdateProjectTreeRootTitle();
+            statusLabel.Text = $"プロジェクトを保存しました: {Path.GetFileName(path)}";
+            RefreshProperties();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Project save error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            statusLabel.Text = "Project save failed";
+            return false;
+        }
+    }
+
+    private void CloseProject()
+    {
+        if (currentProject is null)
+        {
+            statusLabel.Text = "閉じるプロジェクトがありません";
+            return;
+        }
+
+        if (!ConfirmCloseProjectIfNeeded())
+        {
+            statusLabel.Text = "プロジェクトを閉じる処理をキャンセルしました";
+            return;
+        }
+
+        CloseProjectWithoutPrompt();
+        statusLabel.Text = "プロジェクトを閉じました";
+    }
+
     private void SaveMap()
     {
         var document = CurrentDocument;
@@ -1252,6 +1465,38 @@ public sealed class MainForm : Form
         return true;
     }
 
+    private bool ConfirmCloseProjectIfNeeded()
+    {
+        if (currentProject is null)
+        {
+            return true;
+        }
+
+        if (!ProjectHasUnsavedChanges(currentProject))
+        {
+            return true;
+        }
+
+        var result = MessageBox.Show(
+            this,
+            $"プロジェクト「{currentProject.Name}」は保存されていません。保存しますか？",
+            "保存確認",
+            MessageBoxButtons.YesNoCancel,
+            MessageBoxIcon.Warning);
+
+        return result switch
+        {
+            DialogResult.Yes => TrySaveProject(currentProject),
+            DialogResult.No => true,
+            _ => false
+        };
+    }
+
+    private static bool ProjectHasUnsavedChanges(ProjectDocument project)
+    {
+        return project.IsDirty || project.Maps.Any(item => item.Document.IsDirty);
+    }
+
     private bool ConfirmCloseDocument(MapEditorDocument document)
     {
         if (!document.IsDirty)
@@ -1274,13 +1519,62 @@ public sealed class MainForm : Form
         };
     }
 
-    private bool CloseStandaloneMapsForProjectSwitch()
+    private bool PrepareForProjectSwitch()
     {
+        if (!ConfirmCloseProjectIfNeeded())
+        {
+            return false;
+        }
+
         var standaloneDocuments = EnumerateDocuments()
             .Where(IsStandaloneDocument)
             .ToList();
+        if (!ConfirmCloseDocuments(standaloneDocuments))
+        {
+            return false;
+        }
 
-        return CloseDocuments(standaloneDocuments, promptForSave: true);
+        CloseProjectWithoutPrompt();
+        return CloseDocuments(standaloneDocuments, promptForSave: false);
+    }
+
+    private void CloseProjectWithoutPrompt()
+    {
+        if (currentProject is null)
+        {
+            return;
+        }
+
+        var project = currentProject;
+        var projectDocuments = project.Maps
+            .Select(item => item.Document)
+            .ToList();
+
+        currentProject = null;
+        projectTree.Nodes.Clear();
+        SetProjectPanelVisible(false);
+        projectMapContextActive = false;
+
+        CloseDocuments(projectDocuments, promptForSave: false);
+        if (mapTabs.TabPages.Count > 0)
+        {
+            ShowMapEditorWorkspace(projectContext: false);
+        }
+        else
+        {
+            ShowEmptyWorkspace("新規からプロジェクトまたはマップを作成してください");
+        }
+
+        UpdateDocumentActionsState();
+        RefreshProperties();
+    }
+
+    private static void DisposeProjectDocuments(ProjectDocument project)
+    {
+        foreach (var item in project.Maps)
+        {
+            item.Document.Dispose();
+        }
     }
 
     private bool IsStandaloneDocument(MapEditorDocument document)
@@ -1434,6 +1728,7 @@ public sealed class MainForm : Form
         }
 
         document.IsDirty = true;
+        MarkProjectDirtyForDocument(document);
         document.Viewport.Invalidate();
         UpdateDocumentTabTitle(document);
         UpdateDocumentActionsState();
@@ -1457,6 +1752,7 @@ public sealed class MainForm : Form
         }
 
         document.IsDirty = true;
+        MarkProjectDirtyForDocument(document);
         document.Viewport.Invalidate();
         UpdateDocumentTabTitle(document);
         UpdateDocumentActionsState();

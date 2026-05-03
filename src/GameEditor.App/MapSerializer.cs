@@ -31,6 +31,11 @@ public static class MapSerializer
         var mapFile = JsonSerializer.Deserialize<MapFile>(json, JsonOptions)
             ?? throw new InvalidOperationException("Map file is empty or invalid.");
 
+        return LoadFromMapFile(path, mapFile);
+    }
+
+    public static MapLoadResult LoadFromMapFile(string basePath, MapFile mapFile)
+    {
         ValidateHeader(mapFile.Header);
 
         if (mapFile.Map.Width <= 0 || mapFile.Map.Height <= 0 || mapFile.Map.TileSize <= 0)
@@ -38,14 +43,14 @@ public static class MapSerializer
             throw new InvalidOperationException("Map size or tile size is invalid.");
         }
 
-        var tileSets = LoadTileSets(path, mapFile);
+        var tileSets = LoadTileSets(basePath, mapFile);
         var document = new MapDocument(mapFile.Map.Width, mapFile.Map.Height, mapFile.Map.TileSize);
         ApplyLayers(document, tileSets, mapFile);
 
         return new MapLoadResult(document, tileSets, mapFile.Map.Name);
     }
 
-    private static MapFile CreateMapFile(MapDocument document, IReadOnlyList<TileSet> tileSets, string mapName)
+    public static MapFile CreateMapFile(MapDocument document, IReadOnlyList<TileSet> tileSets, string mapName)
     {
         return new MapFile
         {
