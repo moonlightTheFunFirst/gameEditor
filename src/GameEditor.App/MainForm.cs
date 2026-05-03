@@ -14,6 +14,11 @@ public sealed class MainForm : Form
     private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
     private readonly ToolStripStatusLabel statusLabel = new();
+    private readonly SplitContainer rootSplit = new();
+    private readonly Panel contentHostPanel = new();
+    private readonly Panel startPanel = new();
+    private readonly Label startMessageLabel = new();
+    private readonly TreeView projectTree = new();
     private readonly SplitContainer workspaceSplit = new();
     private readonly DocumentTabControl mapTabs = new();
     private readonly Panel mapHostPanel = new();
@@ -45,6 +50,19 @@ public sealed class MainForm : Form
     private TileSet? previewAdvancedTileSet;
     private bool updatingTileSetSelectors;
     private bool suppressDocumentActivation;
+    private ProjectDocument? currentProject;
+    private bool projectMapContextActive;
+
+    private enum ProjectTreeNodeKind
+    {
+        Project,
+        Maps,
+        Animations,
+        Resources,
+        Map
+    }
+
+    private sealed record ProjectTreeNodeTag(ProjectTreeNodeKind Kind, ProjectMapItem? MapItem = null);
 
     public MainForm()
     {
@@ -76,6 +94,7 @@ public sealed class MainForm : Form
             }
         };
         mapTabs.MouseUp += ShowMapTabContextMenu;
+        projectTree.AfterSelect += ProjectTreeAfterSelect;
         baseTileSetSelector.SelectedIndexChanged += (_, _) => ChangeActiveTileSet(TileSetKind.Base);
         advancedTileSetSelector.SelectedIndexChanged += (_, _) => ChangeActiveTileSet(TileSetKind.Advanced);
         Shown += (_, _) => ApplyInitialTilePanelWidth();
@@ -85,6 +104,7 @@ public sealed class MainForm : Form
         SetEditTool(MapEditTool.Pen);
         UpdateMapWorkspaceState();
         UpdateDocumentActionsState();
+        ShowEmptyWorkspace("新規からプロジェクトまたはマップを作成してください");
         statusLabel.Text = "Ready";
     }
 
@@ -110,10 +130,26 @@ public sealed class MainForm : Form
         var menu = new MenuStrip();
 
         var fileMenu = new ToolStripMenuItem("ファイル");
-        fileMenu.DropDownItems.Add("新規マップ", null, (_, _) => NewMap());
-        fileMenu.DropDownItems.Add("開く", null, (_, _) => OpenMap());
+        var newMenu = new ToolStripMenuItem("新規");
+        newMenu.DropDownItems.Add("プロジェクト", null, (_, _) => NewProject());
+        newMenu.DropDownItems.Add("マップ", null, (_, _) => NewMap());
+        newMenu.DropDownItems.Add("アニメ", null, (_, _) => ShowComingSoon("アニメエディタ"));
+
+        var openMenu = new ToolStripMenuItem("開く");
+        openMenu.DropDownItems.Add("マップ", null, (_, _) => OpenMap());
+
+        var importMenu = new ToolStripMenuItem("インポート");
+        importMenu.DropDownItems.Add("マップ", null, (_, _) => ImportMap());
+
+        var exportMenu = new ToolStripMenuItem("エクスポート");
+        exportMenu.DropDownItems.Add("マップ", null, (_, _) => ExportCurrentMap());
+
+        fileMenu.DropDownItems.Add(newMenu);
+        fileMenu.DropDownItems.Add(openMenu);
         fileMenu.DropDownItems.Add("保存", null, (_, _) => SaveMap());
         fileMenu.DropDownItems.Add("名前を付けて保存", null, (_, _) => SaveMapAs());
+        fileMenu.DropDownItems.Add(importMenu);
+        fileMenu.DropDownItems.Add(exportMenu);
         fileMenu.DropDownItems.Add(new ToolStripSeparator());
         fileMenu.DropDownItems.Add("終了", null, (_, _) => Close());
 
@@ -130,10 +166,10 @@ public sealed class MainForm : Form
         editMenu.DropDownItems.Add(closeMapMenuItem);
 
         var editorMenu = new ToolStripMenuItem("エディタ");
-        editorMenu.DropDownItems.Add("マップエディター");
-        editorMenu.DropDownItems.Add("アニメーションエディター");
-        editorMenu.DropDownItems.Add("エフェクトエディター");
-        editorMenu.DropDownItems.Add("コリジョンエディター");
+        editorMenu.DropDownItems.Add("マップエディター", null, (_, _) => ShowMapEditorWorkspace(IsProjectMapContextSelected()));
+        editorMenu.DropDownItems.Add("アニメーションエディター", null, (_, _) => ShowComingSoon("アニメーションエディター"));
+        editorMenu.DropDownItems.Add("エフェクトエディター", null, (_, _) => ShowComingSoon("エフェクトエディター"));
+        editorMenu.DropDownItems.Add("コリジョンエディター", null, (_, _) => ShowComingSoon("コリジョンエディター"));
 
         var viewMenu = new ToolStripMenuItem("表示");
         viewMenu.DropDownItems.Add("グリッド");
@@ -155,7 +191,8 @@ public sealed class MainForm : Form
             Dock = DockStyle.Top
         };
 
-        toolStrip.Items.Add(new ToolStripButton("新規", null, (_, _) => NewMap()));
+        toolStrip.Items.Add(new ToolStripButton("新規プロジェクト", null, (_, _) => NewProject()));
+        toolStrip.Items.Add(new ToolStripButton("新規マップ", null, (_, _) => NewMap()));
         toolStrip.Items.Add(new ToolStripButton("開く", null, (_, _) => OpenMap()));
         toolStrip.Items.Add(new ToolStripButton("保存", null, (_, _) => SaveMap()));
         toolStrip.Items.Add(new ToolStripSeparator());
@@ -183,6 +220,17 @@ public sealed class MainForm : Form
 
     private Control BuildWorkspace()
     {
+        rootSplit.Dock = DockStyle.Fill;
+        rootSplit.FixedPanel = FixedPanel.Panel1;
+        rootSplit.Panel1MinSize = 180;
+        rootSplit.SplitterWidth = 6;
+        rootSplit.SplitterDistance = 240;
+        rootSplit.Panel1Collapsed = true;
+        rootSplit.Panel1.Controls.Add(BuildProjectPanel());
+
+        contentHostPanel.Dock = DockStyle.Fill;
+        contentHostPanel.BackColor = EmptyWorkspaceColor;
+
         workspaceSplit.Dock = DockStyle.Fill;
         workspaceSplit.FixedPanel = FixedPanel.Panel1;
         workspaceSplit.Panel1MinSize = TilePanelInitialWidth;
@@ -191,8 +239,53 @@ public sealed class MainForm : Form
 
         workspaceSplit.Panel1.Controls.Add(BuildTilePanel());
         workspaceSplit.Panel2.Controls.Add(BuildEditorArea());
+        workspaceSplit.Visible = false;
 
-        return workspaceSplit;
+        ConfigureStartPanel();
+        contentHostPanel.Controls.Add(workspaceSplit);
+        contentHostPanel.Controls.Add(startPanel);
+        rootSplit.Panel2.Controls.Add(contentHostPanel);
+
+        return rootSplit;
+    }
+
+    private Control BuildProjectPanel()
+    {
+        var panel = new Panel
+        {
+            Dock = DockStyle.Fill,
+            Padding = new Padding(6)
+        };
+
+        var title = new Label
+        {
+            Dock = DockStyle.Top,
+            Height = 24,
+            Text = "プロジェクト",
+            TextAlign = ContentAlignment.MiddleLeft
+        };
+
+        projectTree.Dock = DockStyle.Fill;
+        projectTree.HideSelection = false;
+        projectTree.LabelEdit = false;
+
+        panel.Controls.Add(projectTree);
+        panel.Controls.Add(title);
+        return panel;
+    }
+
+    private void ConfigureStartPanel()
+    {
+        startPanel.Dock = DockStyle.Fill;
+        startPanel.BackColor = EmptyWorkspaceColor;
+
+        startMessageLabel.AutoSize = false;
+        startMessageLabel.Dock = DockStyle.Fill;
+        startMessageLabel.TextAlign = ContentAlignment.MiddleCenter;
+        startMessageLabel.ForeColor = Color.FromArgb(168, 174, 184);
+        startMessageLabel.BackColor = EmptyWorkspaceColor;
+
+        startPanel.Controls.Add(startMessageLabel);
     }
 
     private void ConfigureMapTabContextMenu()
@@ -238,6 +331,34 @@ public sealed class MainForm : Form
 
         workspaceSplit.Panel1MinSize = TilePanelInitialWidth;
         workspaceSplit.SplitterDistance = TilePanelInitialWidth;
+    }
+
+    private void ShowMapEditorWorkspace(bool projectContext)
+    {
+        projectMapContextActive = projectContext;
+        startPanel.Visible = false;
+        workspaceSplit.Visible = true;
+        workspaceSplit.BringToFront();
+        UpdateMapWorkspaceState();
+        ApplyInitialTilePanelWidth();
+    }
+
+    private void ShowEmptyWorkspace(string message)
+    {
+        projectMapContextActive = false;
+        startMessageLabel.Text = message;
+        workspaceSplit.Visible = false;
+        startPanel.Visible = true;
+        startPanel.BringToFront();
+    }
+
+    private void SetProjectPanelVisible(bool visible)
+    {
+        rootSplit.Panel1Collapsed = !visible;
+        if (visible && rootSplit.SplitterDistance < 180)
+        {
+            rootSplit.SplitterDistance = 240;
+        }
     }
 
     private Control BuildEditorArea()
@@ -362,6 +483,26 @@ public sealed class MainForm : Form
         return panel;
     }
 
+    private void NewProject()
+    {
+        using var dialog = new NewProjectDialog();
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        currentProject = new ProjectDocument(dialog.ProjectName);
+        SetProjectPanelVisible(true);
+        RefreshProjectTree(null);
+        if (projectTree.Nodes.Count > 0)
+        {
+            projectTree.SelectedNode = projectTree.Nodes[0];
+        }
+
+        ShowEmptyWorkspace("プロジェクトツリーからエディタを選択してください");
+        statusLabel.Text = $"新規プロジェクト: {currentProject.Name}";
+    }
+
     private void NewMap()
     {
         using var dialog = new NewMapDialog();
@@ -385,7 +526,14 @@ public sealed class MainForm : Form
             dialog.MapName,
             new MapDocument(dialog.MapWidth, dialog.MapHeight, dialog.TileSize),
             tileSets);
+        var attachToProject = IsProjectMapContextSelected();
+        ShowMapEditorWorkspace(attachToProject);
         AddDocumentTab(document);
+        if (attachToProject)
+        {
+            AddProjectMap(document);
+        }
+
         statusLabel.Text = $"新規マップ: {document.Name}";
     }
 
@@ -404,10 +552,35 @@ public sealed class MainForm : Form
             return;
         }
 
-        LoadMapFrom(dialog.FileName);
+        LoadMapFrom(dialog.FileName, addToProject: currentProject is not null);
     }
 
-    private void LoadMapFrom(string path)
+    private void ImportMap()
+    {
+        if (currentProject is null)
+        {
+            statusLabel.Text = "インポート先のプロジェクトがありません";
+            MessageBox.Show(this, "マップをインポートするにはプロジェクトを作成してください。", "Import map", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        using var dialog = new OpenFileDialog
+        {
+            AddExtension = true,
+            DefaultExt = "gemap.json",
+            Filter = "gameEditor map (*.gemap.json)|*.gemap.json|JSON (*.json)|*.json|All files (*.*)|*.*",
+            Title = "マップをインポート"
+        };
+
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        LoadMapFrom(dialog.FileName, addToProject: true);
+    }
+
+    private void LoadMapFrom(string path, bool addToProject)
     {
         try
         {
@@ -418,13 +591,163 @@ public sealed class MainForm : Form
             };
             ApplyCatalogTileSets(document, markDirty: false);
 
+            ShowMapEditorWorkspace(projectContext: addToProject);
             AddDocumentTab(document);
+            if (addToProject)
+            {
+                AddProjectMap(document);
+            }
+
             statusLabel.Text = $"読み込みました: {Path.GetFileName(path)}";
         }
         catch (Exception ex)
         {
             MessageBox.Show(this, ex.Message, "Load error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             statusLabel.Text = "Load failed";
+        }
+    }
+
+    private bool IsProjectMapContextSelected()
+    {
+        return currentProject is not null
+            && projectTree.SelectedNode?.Tag is ProjectTreeNodeTag
+            {
+                Kind: ProjectTreeNodeKind.Maps or ProjectTreeNodeKind.Map
+            };
+    }
+
+    private void AddProjectMap(MapEditorDocument document)
+    {
+        if (currentProject is null)
+        {
+            return;
+        }
+
+        if (currentProject.Maps.Any(item => ReferenceEquals(item.Document, document)))
+        {
+            RefreshProjectTree(document);
+            return;
+        }
+
+        currentProject.Maps.Add(new ProjectMapItem(document));
+        RefreshProjectTree(document);
+    }
+
+    private void RemoveProjectMap(MapEditorDocument document)
+    {
+        if (currentProject is null)
+        {
+            return;
+        }
+
+        var item = currentProject.Maps.FirstOrDefault(item => ReferenceEquals(item.Document, document));
+        if (item is null)
+        {
+            return;
+        }
+
+        currentProject.Maps.Remove(item);
+        RefreshProjectTree(null);
+    }
+
+    private void RefreshProjectTree(MapEditorDocument? selectedDocument)
+    {
+        projectTree.BeginUpdate();
+        try
+        {
+            projectTree.Nodes.Clear();
+            if (currentProject is null)
+            {
+                return;
+            }
+
+            var root = new TreeNode(currentProject.Name)
+            {
+                Tag = new ProjectTreeNodeTag(ProjectTreeNodeKind.Project)
+            };
+            var maps = new TreeNode("マップ")
+            {
+                Tag = new ProjectTreeNodeTag(ProjectTreeNodeKind.Maps)
+            };
+            var animations = new TreeNode("アニメ")
+            {
+                Tag = new ProjectTreeNodeTag(ProjectTreeNodeKind.Animations)
+            };
+            var resources = new TreeNode("リソース")
+            {
+                Tag = new ProjectTreeNodeTag(ProjectTreeNodeKind.Resources)
+            };
+
+            TreeNode? selectedNode = null;
+            foreach (var item in currentProject.Maps)
+            {
+                var node = new TreeNode(item.Name)
+                {
+                    Tag = new ProjectTreeNodeTag(ProjectTreeNodeKind.Map, item)
+                };
+                maps.Nodes.Add(node);
+                if (selectedDocument is not null && ReferenceEquals(item.Document, selectedDocument))
+                {
+                    selectedNode = node;
+                }
+            }
+
+            root.Nodes.Add(maps);
+            root.Nodes.Add(animations);
+            root.Nodes.Add(resources);
+            projectTree.Nodes.Add(root);
+            root.Expand();
+            maps.Expand();
+            projectTree.SelectedNode = selectedNode ?? maps;
+        }
+        finally
+        {
+            projectTree.EndUpdate();
+        }
+    }
+
+    private void ProjectTreeAfterSelect(object? sender, TreeViewEventArgs e)
+    {
+        if (e.Node?.Tag is not ProjectTreeNodeTag tag)
+        {
+            return;
+        }
+
+        switch (tag.Kind)
+        {
+            case ProjectTreeNodeKind.Maps:
+                ShowMapEditorWorkspace(projectContext: true);
+                statusLabel.Text = "プロジェクト: マップ";
+                break;
+            case ProjectTreeNodeKind.Map when tag.MapItem is not null:
+                ShowMapEditorWorkspace(projectContext: true);
+                SelectDocument(tag.MapItem.Document);
+                statusLabel.Text = $"プロジェクトマップ: {tag.MapItem.Name}";
+                break;
+            case ProjectTreeNodeKind.Animations:
+                ShowEmptyWorkspace("アニメエディタは未実装です");
+                statusLabel.Text = "プロジェクト: アニメ";
+                break;
+            case ProjectTreeNodeKind.Resources:
+                ShowEmptyWorkspace("リソース管理は未実装です");
+                statusLabel.Text = "プロジェクト: リソース";
+                break;
+            default:
+                ShowEmptyWorkspace("プロジェクト項目を選択してください");
+                statusLabel.Text = currentProject is null ? "Ready" : $"プロジェクト: {currentProject.Name}";
+                break;
+        }
+    }
+
+    private void SelectDocument(MapEditorDocument document)
+    {
+        foreach (TabPage page in mapTabs.TabPages)
+        {
+            if (ReferenceEquals(page.Tag, document))
+            {
+                mapTabs.SelectedTab = page;
+                return;
+            }
         }
     }
 
@@ -821,6 +1144,41 @@ public sealed class MainForm : Form
         SaveMapTo(document, document.FilePath);
     }
 
+    private void ExportCurrentMap()
+    {
+        var document = CurrentDocument;
+        if (document is null)
+        {
+            statusLabel.Text = "エクスポートするマップがありません";
+            return;
+        }
+
+        using var dialog = new SaveFileDialog
+        {
+            AddExtension = true,
+            DefaultExt = "gemap.json",
+            FileName = $"{document.Name}.gemap.json",
+            Filter = "gameEditor map (*.gemap.json)|*.gemap.json|JSON (*.json)|*.json|All files (*.*)|*.*",
+            Title = "マップをエクスポート"
+        };
+
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        try
+        {
+            MapSerializer.Save(dialog.FileName, document.Map, document.TileSets, document.Name);
+            statusLabel.Text = $"エクスポートしました: {Path.GetFileName(dialog.FileName)}";
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Export error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            statusLabel.Text = "Export failed";
+        }
+    }
+
     private void SaveMapTo(MapEditorDocument document, string path)
     {
         try
@@ -850,6 +1208,7 @@ public sealed class MainForm : Form
         var closedName = document.Name;
         var closingIndex = mapTabs.SelectedIndex;
         var nextPage = GetNextMapTabPage(closingIndex);
+        var wasProjectMap = currentProject?.Maps.Any(item => ReferenceEquals(item.Document, document)) == true;
 
         suppressDocumentActivation = true;
         SetRedraw(mapHostPanel, enabled: false);
@@ -871,6 +1230,11 @@ public sealed class MainForm : Form
         finally
         {
             suppressDocumentActivation = false;
+            if (wasProjectMap)
+            {
+                RemoveProjectMap(document);
+            }
+
             ActivateCurrentDocument();
             mapTabs.ResumeLayout(performLayout: true);
             SetRedraw(mapTabs, enabled: true);
@@ -908,6 +1272,12 @@ public sealed class MainForm : Form
             control.Invalidate(invalidateChildren: true);
             control.Update();
         }
+    }
+
+    private void ShowComingSoon(string editorName)
+    {
+        ShowEmptyWorkspace($"{editorName}は未実装です");
+        statusLabel.Text = $"{editorName}: 未実装";
     }
 
     private void UndoMapEdit()
