@@ -236,6 +236,9 @@ public sealed class MainForm : Form
         workspaceSplit.Panel1MinSize = TilePanelInitialWidth;
         workspaceSplit.SplitterWidth = 6;
         workspaceSplit.SplitterDistance = TilePanelInitialWidth;
+        workspaceSplit.BackColor = SystemColors.Control;
+        workspaceSplit.Panel1.BackColor = SystemColors.Control;
+        workspaceSplit.Panel2.BackColor = SystemColors.Control;
 
         workspaceSplit.Panel1.Controls.Add(BuildTilePanel());
         workspaceSplit.Panel2.Controls.Add(BuildEditorArea());
@@ -304,7 +307,8 @@ public sealed class MainForm : Form
         var panel = new Panel
         {
             Dock = DockStyle.Fill,
-            Padding = new Padding(TilePanelPadding)
+            Padding = new Padding(TilePanelPadding),
+            BackColor = SystemColors.Control
         };
 
         var title = new Label
@@ -312,7 +316,9 @@ public sealed class MainForm : Form
             Dock = DockStyle.Top,
             Height = 24,
             Text = "マップチップ",
-            TextAlign = ContentAlignment.MiddleLeft
+            TextAlign = ContentAlignment.MiddleLeft,
+            BackColor = SystemColors.Control,
+            ForeColor = SystemColors.ControlText
         };
 
         ConfigureTileSetTabs();
@@ -439,9 +445,12 @@ public sealed class MainForm : Form
         }
 
         tileSetTabs.Dock = DockStyle.Fill;
+        tileSetTabs.BackColor = SystemColors.Control;
 
         var basePage = new TabPage("ベース");
         var advancedPage = new TabPage("アドバンス");
+        basePage.BackColor = SystemColors.Control;
+        advancedPage.BackColor = SystemColors.Control;
         basePage.Controls.Add(BuildTileSetPage(baseTileSetSelector, basePalette, baseTileSetDefinitions));
         advancedPage.Controls.Add(BuildTileSetPage(advancedTileSetSelector, advancedPalette, advancedTileSetDefinitions));
 
@@ -456,7 +465,8 @@ public sealed class MainForm : Form
     {
         var panel = new Panel
         {
-            Dock = DockStyle.Fill
+            Dock = DockStyle.Fill,
+            BackColor = SystemColors.Control
         };
 
         selector.Dock = DockStyle.Top;
