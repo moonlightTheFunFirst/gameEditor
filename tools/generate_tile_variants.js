@@ -530,6 +530,102 @@ function bridge(a, i) {
   }
 }
 
+function dockObj(a, i) {
+  const x = tx(i);
+  const y = ty(i);
+  rect(a, x + 9, y + 5, 14, 24, [141, 92, 45]);
+  for (let yy = 7; yy < 29; yy += 5) line(a, x + 9, y + yy, x + 22, y + yy, [91, 59, 34]);
+  rect(a, x + 7, y + 8, 3, 19, [86, 55, 32]);
+  rect(a, x + 22, y + 8, 3, 19, [86, 55, 32]);
+  rect(a, x + 11, y + 3, 10, 3, [196, 139, 65]);
+}
+
+function stallObj(a, i, cloth = [181, 52, 48], stripe = [239, 222, 144]) {
+  const x = tx(i);
+  const y = ty(i);
+  rect(a, x + 5, y + 16, 22, 10, [103, 68, 38]);
+  rect(a, x + 6, y + 12, 20, 5, [187, 127, 58]);
+  rect(a, x + 4, y + 7, 24, 7, cloth);
+  for (let xx = 7; xx < 27; xx += 8) rect(a, x + xx, y + 7, 4, 7, stripe);
+  rect(a, x + 9, y + 18, 4, 4, [72, 148, 58]);
+  rect(a, x + 18, y + 18, 4, 4, [224, 176, 65]);
+}
+
+function cartObj(a, i) {
+  const x = tx(i);
+  const y = ty(i);
+  rect(a, x + 7, y + 15, 18, 9, [137, 88, 42]);
+  rect(a, x + 9, y + 12, 14, 4, [196, 137, 62]);
+  line(a, x + 25, y + 17, x + 30, y + 14, [92, 58, 35], 2);
+  ellipse(a, x + 11, y + 25, 4, 4, [58, 45, 34]);
+  ellipse(a, x + 22, y + 25, 4, 4, [58, 45, 34]);
+  rect(a, x + 10, y + 24, 3, 3, [173, 132, 74]);
+  rect(a, x + 21, y + 24, 3, 3, [173, 132, 74]);
+}
+
+function roofPieceObj(a, i, roofC = [174, 54, 45]) {
+  const x = tx(i);
+  const y = ty(i);
+  tri(a, [x + 4, y + 21], [x + 16, y + 8], [x + 28, y + 21], [86, 54, 42]);
+  tri(a, [x + 6, y + 20], [x + 16, y + 10], [x + 26, y + 20], roofC);
+  for (let yy = 13; yy < 22; yy += 4) line(a, x + 8, y + yy, x + 24, y + yy, shade(roofC, 38));
+}
+
+function tinyDoorObj(a, i, c = [124, 76, 42]) {
+  const x = tx(i);
+  const y = ty(i);
+  rect(a, x + 9, y + 11, 14, 17, [57, 38, 29]);
+  rect(a, x + 11, y + 13, 10, 15, c);
+  rect(a, x + 18, y + 20, 2, 2, [230, 187, 72]);
+}
+
+function tinyWindowObj(a, i, glass = [106, 180, 220]) {
+  const x = tx(i);
+  const y = ty(i);
+  rect(a, x + 8, y + 12, 16, 12, [84, 58, 38]);
+  rect(a, x + 10, y + 14, 12, 8, glass);
+  line(a, x + 16, y + 14, x + 16, y + 21, [84, 58, 38], 2);
+  line(a, x + 10, y + 18, x + 21, y + 18, [84, 58, 38], 2);
+}
+
+function windmillObj(a, i) {
+  const x = tx(i);
+  const y = ty(i);
+  rect(a, x + 11, y + 14, 10, 13, [210, 184, 124]);
+  tri(a, [x + 9, y + 15], [x + 16, y + 7], [x + 23, y + 15], [133, 80, 43]);
+  line(a, x + 16, y + 12, x + 16, y + 3, [238, 224, 173], 2);
+  line(a, x + 16, y + 12, x + 28, y + 12, [238, 224, 173], 2);
+  line(a, x + 16, y + 12, x + 6, y + 20, [238, 224, 173], 2);
+  line(a, x + 16, y + 12, x + 9, y + 5, [238, 224, 173], 2);
+}
+
+function castleTowerObj(a, i) {
+  const x = tx(i);
+  const y = ty(i);
+  rect(a, x + 9, y + 9, 14, 19, [119, 121, 126]);
+  rect(a, x + 7, y + 6, 18, 5, [155, 157, 162]);
+  rect(a, x + 13, y + 18, 6, 10, [48, 51, 59]);
+  for (let k = 0; k < 3; k++) rect(a, x + 8 + k * 7, y + 4, 4, 3, [91, 94, 101]);
+}
+
+function castleGateObj(a, i) {
+  const x = tx(i);
+  const y = ty(i);
+  rect(a, x + 5, y + 14, 22, 13, [108, 111, 117]);
+  rect(a, x + 8, y + 10, 16, 5, [153, 155, 160]);
+  rect(a, x + 11, y + 17, 10, 10, [49, 51, 58]);
+  line(a, x + 16, y + 17, x + 16, y + 27, [99, 73, 47]);
+}
+
+function stonePileObj(a, i, gem = [123, 155, 167]) {
+  const x = tx(i);
+  const y = ty(i);
+  ellipse(a, x + 10, y + 23, 6, 4, [91, 94, 94]);
+  ellipse(a, x + 18, y + 18, 7, 6, [125, 129, 128]);
+  ellipse(a, x + 24, y + 24, 5, 3, [78, 82, 84]);
+  rect(a, x + 18, y + 16, 3, 3, gem);
+}
+
 function door(a, i, woodC = [126, 76, 39]) {
   const x = tx(i);
   const y = ty(i);
@@ -642,12 +738,24 @@ function drawWorldObj(a, i, type) {
   else if (type === 'bush') {
     ellipse(a, tx(i) + 16, ty(i) + 21, 12, 6, [45, 128, 46]);
     rect(a, tx(i) + 8, ty(i) + 14, 16, 8, [90, 169, 62]);
-  } else if (type === 'flowers' || type === 'flowers2') {
+  } else if (type === 'flowers') {
     for (let k = 0; k < 7; k++) {
       rect(a, tx(i) + 5 + k * 3, ty(i) + 18 - (k % 2) * 5, 2, 2, [[240, 232, 92], [239, 112, 145], [245, 246, 246]][k % 3]);
       rect(a, tx(i) + 5 + k * 3, ty(i) + 20 - (k % 2) * 5, 1, 5, [41, 128, 44]);
     }
-  } else if (type.startsWith('deadTree')) deadTree(a, i);
+  } else if (type === 'flowers2') {
+    for (let k = 0; k < 9; k++) {
+      const ox = (k % 3) * 7;
+      const oy = Math.floor(k / 3) * 5;
+      rect(a, tx(i) + 7 + ox, ty(i) + 12 + oy, 2, 2, [[146, 192, 242], [195, 131, 230], [255, 235, 132]][k % 3]);
+      rect(a, tx(i) + 8 + ox, ty(i) + 14 + oy, 1, 5, [54, 134, 63]);
+    }
+  } else if (type === 'deadTree') deadTree(a, i);
+  else if (type === 'deadTree2') {
+    deadTree(a, i);
+    rect(a, tx(i) + 8, ty(i) + 24, 15, 4, [115, 82, 51]);
+    line(a, tx(i) + 17, ty(i) + 12, tx(i) + 27, ty(i) + 9, [96, 63, 40], 2);
+  }
   else if (type === 'log') {
     rect(a, tx(i) + 7, ty(i) + 20, 19, 6, [116, 79, 42]);
     ellipse(a, tx(i) + 8, ty(i) + 21, 4, 5, [87, 54, 31]);
@@ -663,23 +771,44 @@ function drawWorldObj(a, i, type) {
   } else if (type === 'swamp') {
     rect(a, tx(i) + 6, ty(i) + 16, 20, 12, [66, 92, 67]);
     speck(a, i, [39, 69, 53], [93, 129, 80], 20, 117);
-  } else if (type === 'bridge' || type === 'dock') bridge(a, i);
+  } else if (type === 'bridge') bridge(a, i);
+  else if (type === 'dock') dockObj(a, i);
   else if (type === 'pier') {
     rect(a, tx(i) + 5, ty(i) + 15, 22, 12, [81, 61, 40]);
     rect(a, tx(i) + 7, ty(i) + 11, 18, 3, [210, 171, 83]);
     for (let xx = 8; xx < 26; xx += 6) rect(a, tx(i) + xx, ty(i) + 13, 2, 12, [52, 40, 29]);
   } else if (type === 'fence') fence(a, i);
   else if (type === 'sign') sign(a, i);
-  else if (type === 'crate' || type === 'crate2') crate(a, i);
-  else if (type.startsWith('well')) well(a, i);
+  else if (type === 'crate') crate(a, i);
+  else if (type === 'crate2') {
+    crate(a, i);
+    rect(a, tx(i) + 10, ty(i) + 15, 12, 4, [83, 133, 65]);
+  } else if (type === 'well') well(a, i);
+  else if (type === 'well2') {
+    well(a, i);
+    tri(a, [tx(i) + 8, ty(i) + 13], [tx(i) + 16, ty(i) + 5], [tx(i) + 24, ty(i) + 13], [159, 76, 46]);
+    rect(a, tx(i) + 9, ty(i) + 13, 14, 3, [214, 151, 75]);
+  }
   else if (type === 'barrel') barrel(a, i);
-  else if (type.startsWith('chest')) {
+  else if (type === 'chest') {
     rect(a, tx(i) + 8, ty(i) + 12, 16, 13, [118, 74, 39]);
     border(a, tx(i) + 8, ty(i) + 12, 16, 13, [70, 46, 31]);
     rect(a, tx(i) + 9, ty(i) + 10, 14, 3, [228, 178, 64]);
+  } else if (type === 'chest2') {
+    rect(a, tx(i) + 8, ty(i) + 12, 16, 13, [56, 91, 139]);
+    border(a, tx(i) + 8, ty(i) + 12, 16, 13, [37, 52, 74]);
+    rect(a, tx(i) + 9, ty(i) + 10, 14, 3, [226, 188, 76]);
+    rect(a, tx(i) + 15, ty(i) + 16, 3, 4, [226, 188, 76]);
   } else if (type === 'houseRed') house(a, i, [180, 59, 49], [214, 181, 118]);
   else if (type === 'houseBlue') house(a, i, [67, 103, 169], [212, 206, 164]);
-  else if (type === 'castle' || type === 'castleTower' || type === 'gate') castle(a, i);
+  else if (type === 'roofPiece') roofPieceObj(a, i, [190, 65, 52]);
+  else if (type === 'stall') stallObj(a, i);
+  else if (type === 'windowTiny') tinyWindowObj(a, i);
+  else if (type === 'doorTiny') tinyDoorObj(a, i);
+  else if (type === 'cart') cartObj(a, i);
+  else if (type === 'castle') castle(a, i);
+  else if (type === 'castleTower') castleTowerObj(a, i);
+  else if (type === 'gate') castleGateObj(a, i);
   else if (type === 'banner') banner(a, i);
   else if (type === 'torch') {
     rect(a, tx(i) + 12, ty(i) + 9, 8, 17, [116, 80, 41]);
@@ -696,7 +825,12 @@ function drawWorldObj(a, i, type) {
   } else if (type === 'hay') {
     rect(a, tx(i) + 9, ty(i) + 10, 14, 17, [204, 194, 120]);
     for (let k = 0; k < 4; k++) line(a, tx(i) + 10 + k * 3, ty(i) + 11, tx(i) + 10 + k * 3, ty(i) + 26, [132, 115, 65]);
-  } else if (type === 'coal' || type === 'ore' || type === 'stonePile') rockObj(a, i, [113, 132, 138]);
+  } else if (type === 'tableOut') {
+    table(a, i);
+    rect(a, tx(i) + 13, ty(i) + 12, 6, 4, [222, 182, 76]);
+  } else if (type === 'coal') stonePileObj(a, i, [42, 45, 52]);
+  else if (type === 'ore') stonePileObj(a, i, [89, 183, 205]);
+  else if (type === 'stonePile') stonePileObj(a, i, [136, 136, 136]);
   else if (type === 'grassTuft') {
     rect(a, tx(i) + 4, ty(i) + 22, 24, 5, [51, 121, 49]);
     for (let k = 0; k < 8; k++) rect(a, tx(i) + 4 + k * 3, ty(i) + 14 - (k % 2) * 3, 2, 10 + (k % 2) * 3, [98, 177, 64]);
@@ -709,6 +843,24 @@ function drawWorldObj(a, i, type) {
     ellipse(a, tx(i) + 16, ty(i) + 19, 8, 6, [216, 112, 46]);
     rect(a, tx(i) + 15, ty(i) + 10, 4, 5, [64, 124, 51]);
   } else if (type === 'cypress') pine(a, i, [79, 137, 62]);
+  else if (type === 'houseBrown') house(a, i, [139, 86, 42], [224, 196, 132]);
+  else if (type === 'shop') {
+    house(a, i, [167, 62, 57], [224, 201, 143]);
+    awning(a, i, [183, 50, 52], [238, 222, 141]);
+  } else if (type === 'shed') {
+    rect(a, tx(i) + 7, ty(i) + 15, 18, 12, [126, 84, 49]);
+    roofPieceObj(a, i, [93, 77, 65]);
+    rect(a, tx(i) + 13, ty(i) + 20, 6, 7, [78, 50, 33]);
+  } else if (type === 'tavern') {
+    house(a, i, [126, 67, 42], [216, 184, 123]);
+    sign(a, i);
+    rect(a, tx(i) + 12, ty(i) + 11, 8, 3, [196, 74, 45]);
+  } else if (type === 'market') stallObj(a, i, [48, 120, 166], [241, 240, 225]);
+  else if (type === 'barn') {
+    house(a, i, [119, 38, 35], [174, 67, 50]);
+    rect(a, tx(i) + 11, ty(i) + 18, 10, 10, [83, 45, 32]);
+    line(a, tx(i) + 11, ty(i) + 18, tx(i) + 20, ty(i) + 27, [218, 192, 126]);
+  } else if (type === 'mill') windmillObj(a, i);
   else house(a, i, [148, 91, 41], [224, 201, 143]);
 }
 
@@ -733,51 +885,157 @@ function drawTownObj(a, i, type) {
   else if (type === 'awningBlue') awning(a, i, [52, 118, 166], [241, 241, 229]);
   else if (type === 'shopFront') house(a, i, [151, 44, 41], [224, 201, 143]);
   else if (type === 'houseFront') house(a, i, [108, 39, 36], [214, 185, 110]);
-  else if (type === 'counter' || type === 'bar') counter(a, i);
-  else if (type === 'shelf' || type === 'bookcase' || type === 'weaponRack' || type === 'potionRack') shelf(a, i);
+  else if (type === 'counter') counter(a, i);
+  else if (type === 'bar') {
+    counter(a, i);
+    rect(a, tx(i) + 10, ty(i) + 12, 3, 5, [80, 145, 82]);
+    rect(a, tx(i) + 16, ty(i) + 11, 3, 6, [157, 64, 83]);
+    rect(a, tx(i) + 22, ty(i) + 13, 2, 4, [224, 191, 92]);
+  } else if (type === 'shelf') shelf(a, i);
+  else if (type === 'bookcase') {
+    shelf(a, i);
+    for (let k = 0; k < 6; k++) rect(a, tx(i) + 10 + k * 2, ty(i) + 12, 1, 4, [[59, 104, 170], [161, 58, 61], [219, 183, 76]][k % 3]);
+  } else if (type === 'weaponRack') {
+    shelf(a, i);
+    line(a, tx(i) + 12, ty(i) + 11, tx(i) + 20, ty(i) + 23, [188, 190, 189], 2);
+    line(a, tx(i) + 20, ty(i) + 11, tx(i) + 12, ty(i) + 23, [188, 190, 189], 2);
+  } else if (type === 'potionRack') {
+    shelf(a, i);
+    rect(a, tx(i) + 11, ty(i) + 14, 3, 5, [82, 150, 211]);
+    rect(a, tx(i) + 16, ty(i) + 13, 3, 6, [188, 75, 177]);
+    rect(a, tx(i) + 21, ty(i) + 15, 3, 4, [84, 190, 95]);
+  }
   else if (type === 'display' || type === 'plantShelf') {
     counter(a, i);
     rect(a, tx(i) + 12, ty(i) + 10, 8, 5, type === 'plantShelf' ? [65, 132, 58] : [233, 205, 105]);
-  } else if (type === 'innSign' || type === 'itemSign' || type === 'sign' || type === 'notice') sign(a, i);
+  } else if (type === 'innSign') {
+    sign(a, i);
+    rect(a, tx(i) + 11, ty(i) + 12, 10, 3, [72, 112, 184]);
+  } else if (type === 'itemSign') {
+    sign(a, i);
+    ellipse(a, tx(i) + 16, ty(i) + 13, 4, 3, [226, 185, 65]);
+  } else if (type === 'sign') sign(a, i);
+  else if (type === 'notice') {
+    rect(a, tx(i) + 9, ty(i) + 7, 14, 18, [224, 214, 174]);
+    border(a, tx(i) + 9, ty(i) + 7, 14, 18, [116, 92, 62]);
+    line(a, tx(i) + 12, ty(i) + 12, tx(i) + 20, ty(i) + 12, [104, 74, 52]);
+    line(a, tx(i) + 12, ty(i) + 17, tx(i) + 19, ty(i) + 17, [104, 74, 52]);
+  }
   else if (type === 'bed') bed(a, i);
   else if (type === 'bench') fence(a, i);
   else if (type === 'chair') chair(a, i);
-  else if (type === 'table' || type === 'tavernTable' || type === 'foodTable' || type === 'bookTable' || type === 'shopTable') table(a, i);
-  else if (type === 'cabinet' || type === 'dresser') {
+  else if (type === 'table') table(a, i);
+  else if (type === 'shopTable') {
+    table(a, i);
+    rect(a, tx(i) + 10, ty(i) + 12, 5, 4, [71, 147, 76]);
+    rect(a, tx(i) + 18, ty(i) + 12, 5, 4, [225, 178, 70]);
+  } else if (type === 'foodTable') {
+    table(a, i);
+    ellipse(a, tx(i) + 16, ty(i) + 13, 5, 3, [229, 198, 126]);
+    rect(a, tx(i) + 13, ty(i) + 11, 5, 3, [198, 76, 48]);
+  } else if (type === 'bookTable') {
+    table(a, i);
+    rect(a, tx(i) + 11, ty(i) + 11, 5, 5, [58, 101, 164]);
+    rect(a, tx(i) + 17, ty(i) + 11, 5, 5, [187, 67, 71]);
+  } else if (type === 'tavernTable') {
+    table(a, i);
+    rect(a, tx(i) + 11, ty(i) + 11, 4, 5, [218, 180, 75]);
+    rect(a, tx(i) + 20, ty(i) + 12, 3, 4, [82, 145, 82]);
+  } else if (type === 'cabinet') {
     rect(a, tx(i) + 9, ty(i) + 9, 14, 18, [108, 76, 48]);
     rect(a, tx(i) + 11, ty(i) + 13, 10, 10, [217, 177, 87]);
     rect(a, tx(i) + 10, ty(i) + 10, 12, 3, [72, 46, 32]);
-  } else if (type === 'stove') castle(a, i);
+  } else if (type === 'dresser') {
+    rect(a, tx(i) + 8, ty(i) + 13, 16, 13, [116, 76, 45]);
+    for (let yy = 15; yy < 25; yy += 5) {
+      rect(a, tx(i) + 10, ty(i) + yy, 12, 3, [191, 136, 68]);
+      rect(a, tx(i) + 15, ty(i) + yy + 1, 2, 1, [231, 184, 80]);
+    }
+    rect(a, tx(i) + 10, ty(i) + 9, 12, 4, [77, 50, 33]);
+  } else if (type === 'stove') {
+    rect(a, tx(i) + 8, ty(i) + 11, 16, 16, [83, 86, 91]);
+    rect(a, tx(i) + 10, ty(i) + 15, 12, 8, [40, 42, 46]);
+    rect(a, tx(i) + 13, ty(i) + 17, 6, 4, [231, 106, 45]);
+    rect(a, tx(i) + 11, ty(i) + 8, 10, 3, [145, 147, 150]);
+  }
   else if (type === 'barrel') barrel(a, i);
-  else if (type === 'crate' || type === 'marketBox') crate(a, i);
-  else if (type === 'lamp' || type === 'torch' || type === 'candles') {
+  else if (type === 'crate') crate(a, i);
+  else if (type === 'marketBox') {
+    crate(a, i);
+    rect(a, tx(i) + 10, ty(i) + 15, 12, 4, [72, 151, 69]);
+  } else if (type === 'lamp') {
     rect(a, tx(i) + 12, ty(i) + 9, 8, 17, [116, 80, 41]);
     ellipse(a, tx(i) + 16, ty(i) + 8, 7, 5, [242, 189, 62]);
-  } else if (type === 'fountain' || type === 'well') well(a, i);
-  else if (type === 'pillar' || type === 'statue') {
+  } else if (type === 'torch') {
+    rect(a, tx(i) + 14, ty(i) + 8, 4, 19, [91, 61, 38]);
+    ellipse(a, tx(i) + 16, ty(i) + 8, 6, 5, [244, 178, 55]);
+    ellipse(a, tx(i) + 16, ty(i) + 9, 3, 3, [217, 77, 43]);
+  } else if (type === 'candles') {
+    rect(a, tx(i) + 9, ty(i) + 14, 4, 12, [232, 222, 176]);
+    rect(a, tx(i) + 15, ty(i) + 11, 4, 15, [232, 222, 176]);
+    rect(a, tx(i) + 21, ty(i) + 15, 4, 11, [232, 222, 176]);
+    rect(a, tx(i) + 10, ty(i) + 12, 2, 2, [244, 178, 55]);
+    rect(a, tx(i) + 16, ty(i) + 9, 2, 2, [244, 178, 55]);
+    rect(a, tx(i) + 22, ty(i) + 13, 2, 2, [244, 178, 55]);
+  } else if (type === 'fountain') {
+    ellipse(a, tx(i) + 16, ty(i) + 20, 10, 6, [96, 141, 163]);
+    rect(a, tx(i) + 11, ty(i) + 16, 10, 6, [126, 142, 149]);
+    line(a, tx(i) + 16, ty(i) + 9, tx(i) + 16, ty(i) + 17, [140, 214, 236], 2);
+  } else if (type === 'well') well(a, i);
+  else if (type === 'pillar') {
     rect(a, tx(i) + 9, ty(i) + 8, 14, 19, [109, 111, 116]);
     rect(a, tx(i) + 10, ty(i) + 5, 12, 4, [166, 168, 171]);
     rect(a, tx(i) + 11, ty(i) + 24, 10, 3, [72, 74, 79]);
-  } else if (type === 'castleWall' || type === 'gate' || type === 'tower') castle(a, i);
-  else if (type === 'throne' || type === 'altar') throne(a, i);
+  } else if (type === 'statue') {
+    rect(a, tx(i) + 10, ty(i) + 13, 12, 14, [128, 130, 134]);
+    ellipse(a, tx(i) + 16, ty(i) + 9, 5, 5, [155, 157, 160]);
+    rect(a, tx(i) + 8, ty(i) + 25, 16, 3, [85, 87, 92]);
+  } else if (type === 'castleWall') castle(a, i);
+  else if (type === 'gate') castleGateObj(a, i);
+  else if (type === 'tower') castleTowerObj(a, i);
+  else if (type === 'throne') throne(a, i);
+  else if (type === 'altar') {
+    rect(a, tx(i) + 7, ty(i) + 17, 18, 9, [150, 150, 154]);
+    rect(a, tx(i) + 9, ty(i) + 14, 14, 4, [213, 185, 88]);
+    ellipse(a, tx(i) + 16, ty(i) + 12, 4, 3, [91, 54, 147]);
+  }
   else if (type === 'blueBanner') banner(a, i, [49, 82, 146]);
   else if (type === 'redBanner') banner(a, i, [131, 35, 47]);
   else if (type === 'stairs') stairs(a, i);
   else if (type === 'flag') banner(a, i, [118, 38, 48]);
-  else if (type === 'armor' || type === 'armorStand') {
+  else if (type === 'armor') {
     rect(a, tx(i) + 8, ty(i) + 10, 16, 17, [116, 118, 123]);
     rect(a, tx(i) + 11, ty(i) + 16, 10, 11, [72, 75, 82]);
     rect(a, tx(i) + 10, ty(i) + 7, 12, 4, [164, 166, 170]);
+  } else if (type === 'armorStand') {
+    rect(a, tx(i) + 9, ty(i) + 11, 14, 15, [137, 116, 82]);
+    rect(a, tx(i) + 11, ty(i) + 13, 10, 11, [92, 95, 101]);
+    line(a, tx(i) + 16, ty(i) + 8, tx(i) + 16, ty(i) + 27, [86, 55, 34], 2);
   } else if (type === 'chest') drawWorldObj(a, i, 'chest');
   else if (type === 'rugStand') carpet(a, i, [38, 126, 126], [217, 183, 74]);
-  else if (type === 'villagerProp' || type === 'flowerPot' || type === 'plant' || type === 'vase') {
+  else if (type === 'villagerProp') {
+    rect(a, tx(i) + 11, ty(i) + 12, 10, 14, [87, 122, 178]);
+    ellipse(a, tx(i) + 16, ty(i) + 9, 5, 5, [221, 176, 126]);
+    rect(a, tx(i) + 13, ty(i) + 5, 6, 3, [101, 61, 40]);
+  } else if (type === 'flowerPot') {
     rect(a, tx(i) + 10, ty(i) + 18, 12, 8, [104, 71, 42]);
     rect(a, tx(i) + 12, ty(i) + 13, 8, 6, [65, 127, 61]);
     rect(a, tx(i) + 14, ty(i) + 10, 5, 4, [239, 112, 145]);
+  } else if (type === 'plant') {
+    rect(a, tx(i) + 11, ty(i) + 20, 10, 6, [105, 72, 42]);
+    for (let k = 0; k < 5; k++) line(a, tx(i) + 16, ty(i) + 20, tx(i) + 8 + k * 4, ty(i) + 10 + (k % 2) * 3, [66, 140, 69], 2);
+  } else if (type === 'vase') {
+    ellipse(a, tx(i) + 16, ty(i) + 20, 6, 8, [74, 119, 161]);
+    rect(a, tx(i) + 12, ty(i) + 12, 8, 9, [95, 147, 190]);
+    rect(a, tx(i) + 13, ty(i) + 10, 6, 2, [190, 216, 230]);
   } else if (type === 'magicStand') {
     counter(a, i);
     ellipse(a, tx(i) + 16, ty(i) + 10, 5, 5, [91, 54, 147]);
-  } else if (type === 'weaponStand') shelf(a, i);
+  } else if (type === 'weaponStand') {
+    shelf(a, i);
+    line(a, tx(i) + 16, ty(i) + 8, tx(i) + 16, ty(i) + 25, [192, 193, 190], 2);
+    rect(a, tx(i) + 12, ty(i) + 15, 8, 2, [112, 75, 43]);
+  }
   else if (type === 'kitchen') {
     table(a, i);
     rect(a, tx(i) + 11, ty(i) + 10, 10, 5, [221, 188, 91]);
