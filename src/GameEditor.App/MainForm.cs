@@ -1074,6 +1074,7 @@ public sealed class MainForm : Form
     {
         document.Viewport.EditTool = currentEditTool;
         document.Viewport.SecondaryEditTool = currentSecondaryEditTool;
+        document.Viewport.AttributeMode = currentEditTool == MapEditTool.Attribute;
         document.Viewport.EditApplied += (_, args) =>
         {
             var layer = args.LayerKind is null ? "" : $" / {GetKindName(args.LayerKind.Value)}";
@@ -1151,6 +1152,7 @@ public sealed class MainForm : Form
         viewport.SelectedAttributeValues = GetSelectedAttributeValues();
         viewport.EditTool = currentEditTool;
         viewport.SecondaryEditTool = currentSecondaryEditTool;
+        viewport.AttributeMode = currentEditTool == MapEditTool.Attribute;
     }
 
     private void UpdatePaletteAttributeContext(MapEditorDocument? document)
@@ -2247,6 +2249,8 @@ public sealed class MainForm : Form
         foreach (var document in EnumerateDocuments())
         {
             document.Viewport.EditTool = currentEditTool;
+            document.Viewport.AttributeMode = currentEditTool == MapEditTool.Attribute;
+            document.Viewport.Invalidate();
         }
 
         UpdateToolButtonChecks();

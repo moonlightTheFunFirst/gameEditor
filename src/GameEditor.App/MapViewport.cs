@@ -90,6 +90,10 @@ public sealed class MapViewport : ScrollableControl
 
     [System.ComponentModel.Browsable(false)]
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public bool AttributeMode { get; set; }
+
+    [System.ComponentModel.Browsable(false)]
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public IReadOnlyList<TileSelectionCell> SelectedTileSelection
     {
         get => selectedTileSelection;
@@ -112,7 +116,11 @@ public sealed class MapViewport : ScrollableControl
 
         e.Graphics.TranslateTransform(AutoScrollPosition.X, AutoScrollPosition.Y);
         DrawPlacedTiles(e.Graphics);
-        DrawAttributeOverlay(e.Graphics);
+        if (AttributeMode)
+        {
+            DrawAttributeOverlay(e.Graphics);
+        }
+
         DrawGrid(e.Graphics);
     }
 
@@ -154,7 +162,7 @@ public sealed class MapViewport : ScrollableControl
     {
         base.OnMouseDoubleClick(e);
 
-        if (document is null || selectedTileSet is null || e.Button != MouseButtons.Left)
+        if (!AttributeMode || document is null || selectedTileSet is null || e.Button != MouseButtons.Left)
         {
             return;
         }
@@ -224,7 +232,10 @@ public sealed class MapViewport : ScrollableControl
                 }
                 else if (tool == MapEditTool.Attribute)
                 {
-                    ApplyAttribute(lineCell);
+                    if (AttributeMode)
+                    {
+                        ApplyAttribute(lineCell);
+                    }
                 }
             }
 
@@ -249,7 +260,11 @@ public sealed class MapViewport : ScrollableControl
             case MapEditTool.Select:
                 break;
             case MapEditTool.Attribute:
-                ApplyAttribute(cell);
+                if (AttributeMode)
+                {
+                    ApplyAttribute(cell);
+                }
+
                 break;
         }
     }
@@ -410,7 +425,7 @@ public sealed class MapViewport : ScrollableControl
 
     private void ApplyAttribute(Point cell)
     {
-        if (document is null || selectedTileSet is null)
+        if (!AttributeMode || document is null || selectedTileSet is null)
         {
             return;
         }
