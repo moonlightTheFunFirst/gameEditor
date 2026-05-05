@@ -56,6 +56,7 @@ public sealed class MainForm : Form
     private readonly List<ToolStripItem> resourceToolStripItems = [];
     private readonly List<ToolStripItem> effectToolStripItems = [];
     private readonly List<ToolStripItem> collisionToolStripItems = [];
+    private readonly HashSet<TileSetKind> dirtyTileAttributeKinds = [];
 
     private TilePaletteControl? activePalette;
     private MapEditTool currentEditTool = MapEditTool.Pen;
@@ -169,6 +170,12 @@ public sealed class MainForm : Form
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
+        if (!ConfirmSaveAllTileAttributes())
+        {
+            e.Cancel = true;
+            return;
+        }
+
         if (!ConfirmCloseProjectIfNeeded())
         {
             e.Cancel = true;
@@ -611,14 +618,15 @@ public sealed class MainForm : Form
         var advancedPage = new TabPage("アドバンス");
         basePage.BackColor = SystemColors.Control;
         advancedPage.BackColor = SystemColors.Control;
-        basePage.Controls.Add(BuildTileSetPage(baseTileSetSelector, basePalette, baseTileSetDefinitions));
-        advancedPage.Controls.Add(BuildTileSetPage(advancedTileSetSelector, advancedPalette, advancedTileSetDefinitions));
+        basePage.Controls.Add(BuildTileSetPage(TileSetKind.Base, baseTileSetSelector, basePalette, baseTileSetDefinitions));
+        advancedPage.Controls.Add(BuildTileSetPage(TileSetKind.Advanced, advancedTileSetSelector, advancedPalette, advancedTileSetDefinitions));
 
         tileSetTabs.TabPages.Add(basePage);
         tileSetTabs.TabPages.Add(advancedPage);
     }
 
-    private static Control BuildTileSetPage(
+    private Control BuildTileSetPage(
+        TileSetKind kind,
         ComboBox selector,
         TilePaletteControl palette,
         IReadOnlyList<TileSetDefinition> definitions)
@@ -647,8 +655,16 @@ public sealed class MainForm : Form
             selector.SelectedIndex = 0;
         }
 
+        var toolStrip = new ToolStrip
+        {
+            Dock = DockStyle.Top,
+            GripStyle = ToolStripGripStyle.Hidden
+        };
+        toolStrip.Items.Add(new ToolStripButton("保存", null, (_, _) => SaveTileAttributes(kind)));
+
         palette.Dock = DockStyle.Fill;
         panel.Controls.Add(palette);
+        panel.Controls.Add(toolStrip);
         panel.Controls.Add(selector);
         return panel;
     }
@@ -1198,22 +1214,24 @@ public sealed class MainForm : Form
         if (document is null)
         {
             args.TileSet.AttributeListId = editorActiveAttributeListId;
+            MarkTileAttributesDirty(args.TileSet.Kind);
             RefreshProperties();
             statusLabel.Text = args.AttributeValues.Count > 0
-                ? $"Tile {args.TileId} attributes: {FormatAttributeSet(args.AttributeValues, GetActiveAttributeList(null))}"
-                : $"Tile {args.TileId} attribute cleared";
+                ? $"タイル {args.TileId} の属性: {FormatAttributeSet(args.AttributeValues, GetActiveAttributeList(null))}"
+                : $"タイル {args.TileId} の属性をクリアしました";
             return;
         }
 
         args.TileSet.AttributeListId = document.Map.ActiveAttributeListId;
+        MarkTileAttributesDirty(args.TileSet.Kind);
         document.IsDirty = true;
         MarkProjectDirtyForDocument(document);
         UpdateDocumentTabTitle(document);
         document.Viewport.Invalidate();
         RefreshProperties();
         statusLabel.Text = args.AttributeValues.Count > 0
-            ? $"Tile {args.TileId} attributes: {FormatAttributeSet(args.AttributeValues, document.Map.ActiveAttributeList)}"
-            : $"Tile {args.TileId} attribute cleared";
+            ? $"タイル {args.TileId} の属性: {FormatAttributeSet(args.AttributeValues, document.Map.ActiveAttributeList)}"
+            : $"タイル {args.TileId} の属性をクリアしました";
     }
 
     private void EditAttributeLists()
@@ -1237,6 +1255,8 @@ public sealed class MainForm : Form
             editorAttributeLists.AddRange(editedLists);
             editorActiveAttributeListId = editorAttributeLists.FirstOrDefault()?.Id;
             ApplyActiveAttributeListToPreviewTileSets();
+            MarkTileAttributesDirty(TileSetKind.Base);
+            MarkTileAttributesDirty(TileSetKind.Advanced);
             RefreshAttributeValueSelector(null);
             UpdatePaletteAttributeContext(null);
             RefreshProperties();
@@ -1248,6 +1268,7 @@ public sealed class MainForm : Form
         foreach (var tileSet in document.TileSets)
         {
             tileSet.AttributeListId = document.Map.ActiveAttributeListId;
+            MarkTileAttributesDirty(tileSet.Kind);
         }
 
         document.IsDirty = true;
@@ -1269,11 +1290,12 @@ public sealed class MainForm : Form
 
         tileSet.AttributeListId = document?.Map.ActiveAttributeListId ?? editorActiveAttributeListId;
         tileSet.SetDefaultAttributes(activePalette.SelectedTileId, GetSelectedAttributeValues());
+        MarkTileAttributesDirty(tileSet.Kind);
         activePalette.Invalidate();
         if (document is null)
         {
             RefreshProperties();
-            statusLabel.Text = $"Tile {activePalette.SelectedTileId} attribute set";
+            statusLabel.Text = $"タイル {activePalette.SelectedTileId} の属性を設定しました";
             return;
         }
 
@@ -1281,7 +1303,112 @@ public sealed class MainForm : Form
         MarkProjectDirtyForDocument(document);
         UpdateDocumentTabTitle(document);
         RefreshProperties();
-        statusLabel.Text = $"Tile {activePalette.SelectedTileId} attribute set";
+        statusLabel.Text = $"タイル {activePalette.SelectedTileId} の属性を設定しました";
+    }
+
+    private void MarkTileAttributesDirty(TileSetKind kind)
+    {
+        dirtyTileAttributeKinds.Add(kind);
+    }
+
+    private void SaveTileAttributes(TileSetKind kind)
+    {
+        var tileSet = GetActiveTileSet(kind);
+        var definition = FindDefinitionForTileSet(tileSet, kind) ?? GetSelectedTileSetDefinition(kind);
+        if (tileSet is null || definition is null)
+        {
+            return;
+        }
+
+        try
+        {
+            TileSetCatalog.SaveAttributes(definition, tileSet, GetActiveAttributeLists());
+            SyncTileSetDefinitionAttributes(definition, tileSet, GetActiveAttributeLists());
+            dirtyTileAttributeKinds.Remove(kind);
+            statusLabel.Text = $"チップ属性を保存しました: {definition.Name}";
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "チップ属性の保存エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            statusLabel.Text = "チップ属性の保存に失敗しました";
+        }
+    }
+
+    private bool ConfirmSaveAllTileAttributes()
+    {
+        foreach (var kind in dirtyTileAttributeKinds.ToArray())
+        {
+            if (!ConfirmSaveTileAttributes(kind))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static void SyncTileSetDefinitionAttributes(
+        TileSetDefinition definition,
+        TileSet tileSet,
+        IReadOnlyList<AttributeListDefinition> attributeLists)
+    {
+        definition.AttributeListId = tileSet.AttributeListId;
+        definition.AttributeLists.Clear();
+        definition.AttributeLists.AddRange(attributeLists.Select(list => new AttributeListDefinition(
+            list.Id,
+            list.Name,
+            list.Values.Select(value => new AttributeDefinition(value.Value, value.Name, value.Color)).ToList())));
+        definition.TileAttributes.Clear();
+        foreach (var (tileId, value) in tileSet.TileAttributes)
+        {
+            definition.TileAttributes[tileId] = value;
+        }
+    }
+
+    private bool ConfirmSaveTileAttributes(TileSetKind kind)
+    {
+        if (!dirtyTileAttributeKinds.Contains(kind))
+        {
+            return true;
+        }
+
+        var name = GetActiveTileSet(kind)?.Name ?? GetKindName(kind);
+        var result = MessageBox.Show(
+            this,
+            $"「{name}」のチップ属性が保存されていません。保存しますか？",
+            "チップ属性の保存確認",
+            MessageBoxButtons.YesNoCancel,
+            MessageBoxIcon.Warning);
+
+        if (result == DialogResult.Cancel)
+        {
+            return false;
+        }
+
+        if (result == DialogResult.No)
+        {
+            dirtyTileAttributeKinds.Remove(kind);
+            return true;
+        }
+
+        SaveTileAttributes(kind);
+        return !dirtyTileAttributeKinds.Contains(kind);
+    }
+
+    private TileSet? GetActiveTileSet(TileSetKind kind)
+    {
+        var document = CurrentDocument;
+        if (document is not null)
+        {
+            return document.GetTileSet(kind);
+        }
+
+        return kind == TileSetKind.Base ? previewBaseTileSet : previewAdvancedTileSet;
+    }
+
+    private IReadOnlyList<AttributeListDefinition> GetActiveAttributeLists()
+    {
+        return CurrentDocument?.Map.AttributeLists ?? editorAttributeLists;
     }
 
     private static string FormatAttributeSet(IReadOnlyList<int> values, AttributeListDefinition? list)
@@ -1294,7 +1421,7 @@ public sealed class MainForm : Form
         var names = values
             .Select(value => list?.FindValue(value)?.Name is { Length: > 0 } name ? name : value.ToString())
             .ToArray();
-        return names.Length <= 2 ? string.Join("+", names) : $"{names.Length} selected";
+        return names.Length <= 2 ? string.Join("+", names) : $"{names.Length}個選択";
     }
 
     private void ShowMapTabContextMenu(object? sender, MouseEventArgs e)
@@ -1332,6 +1459,12 @@ public sealed class MainForm : Form
     {
         if (updatingTileSetSelectors)
         {
+            return;
+        }
+
+        if (!ConfirmSaveTileAttributes(kind))
+        {
+            RestoreTileSetSelector(kind);
             return;
         }
 
@@ -1374,10 +1507,6 @@ public sealed class MainForm : Form
 
         var baseTileSet = CreateTileSet(baseDefinition, GetTileSetIndex(TileSetKind.Base), tileSize);
         var advancedTileSet = CreateTileSet(advancedDefinition, GetTileSetIndex(TileSetKind.Advanced), tileSize);
-        CopyTileAttributes(previewBaseTileSet, baseTileSet);
-        CopyTileAttributes(previewAdvancedTileSet, advancedTileSet);
-        baseTileSet.AttributeListId ??= editorActiveAttributeListId;
-        advancedTileSet.AttributeListId ??= editorActiveAttributeListId;
         return [baseTileSet, advancedTileSet];
     }
 
@@ -1396,16 +1525,7 @@ public sealed class MainForm : Form
 
     private void ReplaceDocumentTileSet(MapEditorDocument document, TileSetDefinition definition, bool markDirty)
     {
-        var current = document.GetTileSet(definition.Kind);
         var replacement = CreateTileSet(definition, GetTileSetIndex(definition.Kind), document.Map.TileSize);
-        if (current is not null)
-        {
-            replacement.AttributeListId = current.AttributeListId;
-            foreach (var (tileId, value) in current.TileAttributes)
-            {
-                replacement.SetDefaultAttributes(tileId, TilePlacement.ParseAttributeValues(value));
-            }
-        }
 
         document.ReplaceTileSet(definition.Kind, replacement);
 
@@ -1414,20 +1534,6 @@ public sealed class MainForm : Form
             document.IsDirty = true;
             MarkProjectDirtyForDocument(document);
             UpdateDocumentTabTitle(document);
-        }
-    }
-
-    private static void CopyTileAttributes(TileSet? source, TileSet destination)
-    {
-        if (source is null)
-        {
-            return;
-        }
-
-        destination.AttributeListId = source.AttributeListId;
-        foreach (var (tileId, value) in source.TileAttributes)
-        {
-            destination.SetDefaultAttributes(tileId, TilePlacement.ParseAttributeValues(value));
         }
     }
 
@@ -1514,10 +1620,7 @@ public sealed class MainForm : Form
 
     private void SetPreviewTileSet(TileSetKind kind, TileSetDefinition definition)
     {
-        var current = kind == TileSetKind.Base ? previewBaseTileSet : previewAdvancedTileSet;
         var replacement = CreateTileSet(definition, GetTileSetIndex(kind), InitialTileSize);
-        CopyTileAttributes(current, replacement);
-        replacement.AttributeListId ??= editorActiveAttributeListId;
 
         if (kind == TileSetKind.Base)
         {
@@ -1582,7 +1685,9 @@ public sealed class MainForm : Form
             definition.SourcePath,
             definition.ImagePath,
             tileSize,
-            definition.TransparentColor);
+            definition.TransparentColor,
+            definition.AttributeListId,
+            definition.TileAttributes.ToDictionary());
     }
 
     private static int GetTileSetIndex(TileSetKind kind)
@@ -1676,6 +1781,23 @@ public sealed class MainForm : Form
             MessageBox.Show(this, ex.Message, "Project save error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             statusLabel.Text = "Project save failed";
             return false;
+        }
+    }
+
+    private void RestoreTileSetSelector(TileSetKind kind)
+    {
+        updatingTileSetSelectors = true;
+        try
+        {
+            var tileSet = GetActiveTileSet(kind);
+            SelectDefinition(
+                kind == TileSetKind.Base ? baseTileSetSelector : advancedTileSetSelector,
+                FindDefinitionForTileSet(tileSet, kind),
+                fallbackToFirst: true);
+        }
+        finally
+        {
+            updatingTileSetSelectors = false;
         }
     }
 

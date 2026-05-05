@@ -8,7 +8,11 @@ public sealed class TileSetDefinition
         TileSetKind kind,
         string sourcePath,
         string imagePath,
-        Color? transparentColor)
+        Color? transparentColor,
+        string attributeFilePath,
+        string? attributeListId,
+        List<AttributeListDefinition> attributeLists,
+        Dictionary<int, string> tileAttributes)
     {
         Id = id;
         Name = name;
@@ -16,6 +20,10 @@ public sealed class TileSetDefinition
         SourcePath = sourcePath;
         ImagePath = imagePath;
         TransparentColor = transparentColor;
+        AttributeFilePath = attributeFilePath;
+        AttributeListId = attributeListId;
+        AttributeLists = attributeLists;
+        TileAttributes = tileAttributes;
     }
 
     public string Id { get; }
@@ -29,6 +37,14 @@ public sealed class TileSetDefinition
     public string ImagePath { get; }
 
     public Color? TransparentColor { get; }
+
+    public string AttributeFilePath { get; }
+
+    public string? AttributeListId { get; set; }
+
+    public List<AttributeListDefinition> AttributeLists { get; }
+
+    public Dictionary<int, string> TileAttributes { get; }
 
     public override string ToString()
     {

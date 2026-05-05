@@ -1,0 +1,11 @@
+namespace GameEditor;
+
+public sealed class TileSetAttributeFile
+{
+    public string? AttributeListId { get; set; }
+
+    public List<MapFileAttributeList> AttributeLists { get; set; } = [];
+
+    public Dictionary<int, List<int>> TileAttributes { get; set; } = [];
+}
+

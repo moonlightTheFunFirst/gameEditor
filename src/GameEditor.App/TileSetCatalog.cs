@@ -1,9 +1,21 @@
+using System.Text.Encodings.Web;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
 namespace GameEditor;
 
 public static class TileSetCatalog
 {
     private static readonly string[] SupportedExtensions = [".bmp", ".png"];
     private static readonly Color TransparentColor = Color.Magenta;
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        PropertyNameCaseInsensitive = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        WriteIndented = true
+    };
 
     public static List<TileSetDefinition> Load()
     {
@@ -26,6 +38,8 @@ public static class TileSetCatalog
             var id = Path.GetFileNameWithoutExtension(path);
             var name = Path.GetFileNameWithoutExtension(path);
             var imagePath = Path.Combine("resources", "tiles", Path.GetFileName(path)).Replace('\\', '/');
+            var attributeFilePath = GetAttributeFilePath(path);
+            var attributes = LoadAttributes(attributeFilePath);
 
             definitions.Add(new TileSetDefinition(
                 id,
@@ -33,10 +47,109 @@ public static class TileSetCatalog
                 kind,
                 path,
                 imagePath,
-                hasTransparency ? TransparentColor : null));
+                hasTransparency ? TransparentColor : null,
+                attributeFilePath,
+                attributes.AttributeListId,
+                attributes.AttributeLists.Select(ToAttributeListDefinition).ToList(),
+                attributes.TileAttributes.ToDictionary(
+                    pair => pair.Key,
+                    pair => TilePlacement.FormatAttributeValues(pair.Value))));
         }
 
         return definitions;
+    }
+
+    public static void SaveAttributes(
+        TileSetDefinition definition,
+        TileSet tileSet,
+        IReadOnlyList<AttributeListDefinition> attributeLists)
+    {
+        var file = new TileSetAttributeFile
+        {
+            AttributeListId = tileSet.AttributeListId,
+            AttributeLists = attributeLists.Select(ToMapFileAttributeList).ToList(),
+            TileAttributes = tileSet.TileAttributes.ToDictionary(
+                pair => pair.Key,
+                pair => TilePlacement.ParseAttributeValues(pair.Value).ToList())
+        };
+
+        var json = JsonSerializer.Serialize(file, JsonOptions);
+        File.WriteAllText(definition.AttributeFilePath, json);
+    }
+
+    private static string GetAttributeFilePath(string imagePath)
+    {
+        var directory = Path.GetDirectoryName(imagePath) ?? "";
+        var name = Path.GetFileNameWithoutExtension(imagePath);
+        return Path.Combine(directory, $"{name}.attrs.json");
+    }
+
+    private static TileSetAttributeFile LoadAttributes(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return new TileSetAttributeFile();
+        }
+
+        try
+        {
+            var json = File.ReadAllText(path);
+            return JsonSerializer.Deserialize<TileSetAttributeFile>(json, JsonOptions) ?? new TileSetAttributeFile();
+        }
+        catch
+        {
+            return new TileSetAttributeFile();
+        }
+    }
+
+    private static AttributeListDefinition ToAttributeListDefinition(MapFileAttributeList list)
+    {
+        return new AttributeListDefinition(
+            list.Id,
+            list.Name,
+            list.Values.Select(value => new AttributeDefinition(
+                value.Value,
+                value.Name,
+                ParseHexColor(value.Color) ?? Color.Transparent)).ToList());
+    }
+
+    private static MapFileAttributeList ToMapFileAttributeList(AttributeListDefinition list)
+    {
+        return new MapFileAttributeList
+        {
+            Id = list.Id,
+            Name = list.Name,
+            Values = list.Values.Select(value => new MapFileAttributeValue
+            {
+                Value = value.Value,
+                Name = value.Name,
+                Color = ToHexColor(value.Color)
+            }).ToList()
+        };
+    }
+
+    private static Color? ParseHexColor(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var hex = value.Trim().TrimStart('#');
+        if (hex.Length != 6)
+        {
+            return null;
+        }
+
+        return Color.FromArgb(
+            Convert.ToInt32(hex[0..2], 16),
+            Convert.ToInt32(hex[2..4], 16),
+            Convert.ToInt32(hex[4..6], 16));
+    }
+
+    private static string? ToHexColor(Color color)
+    {
+        return color.A == 0 ? null : $"#{color.R:X2}{color.G:X2}{color.B:X2}";
     }
 
     private static bool ContainsTransparentColor(string path)
