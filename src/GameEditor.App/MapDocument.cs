@@ -113,7 +113,7 @@ public sealed class MapDocument
         return new TileChange(x, y, before, placement);
     }
 
-    public AttributeChange? SetAttributeWithChange(TileSetKind kind, int x, int y, int? attributeValue)
+    public AttributeChange? SetAttributesWithChange(TileSetKind kind, int x, int y, IEnumerable<int> attributeValues)
     {
         if (!IsInside(x, y))
         {
@@ -127,7 +127,7 @@ public sealed class MapDocument
             return null;
         }
 
-        var after = before.WithAttribute(attributeValue);
+        var after = before.WithAttributes(attributeValues);
         if (before == after)
         {
             return null;

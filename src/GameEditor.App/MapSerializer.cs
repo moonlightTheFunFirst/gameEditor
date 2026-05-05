@@ -91,7 +91,9 @@ public static class MapSerializer
             TileSize = tileSet.TileSize,
             TransparentColor = ToHexColor(tileSet.TransparentColor),
             AttributeListId = tileSet.AttributeListId,
-            TileAttributes = tileSet.TileAttributes.ToDictionary()
+            TileAttributes = tileSet.TileAttributes.ToDictionary(
+                pair => pair.Key,
+                pair => TilePlacement.ParseAttributeValues(pair.Value).ToList())
         };
     }
 
@@ -134,7 +136,7 @@ public static class MapSerializer
                 Y = y,
                 TileSetId = tileSet.Id,
                 TileId = placement.TileId,
-                Attribute = placement.AttributeValue
+                AttributeValues = placement.AttributeValues.ToList()
             });
         }
 
@@ -189,7 +191,9 @@ public static class MapSerializer
                 tileSize,
                 ParseHexColor(tileSetFile.TransparentColor),
                 tileSetFile.AttributeListId,
-                tileSetFile.TileAttributes.ToDictionary()));
+                tileSetFile.TileAttributes.ToDictionary(
+                    pair => pair.Key,
+                    pair => TilePlacement.FormatAttributeValues(pair.Value))));
         }
 
         return tileSets;
@@ -232,7 +236,15 @@ public static class MapSerializer
                     continue;
                 }
 
-                document.SetTile(layerKind, tile.X, tile.Y, new TilePlacement(tileSet.Index, tile.TileId, tile.Attribute));
+                var attributes = tile.AttributeValues.Count > 0
+                    ? tile.AttributeValues
+                    : tile.Attribute is { } legacyAttribute
+                        ? [legacyAttribute]
+                        : [];
+                document.SetTile(layerKind, tile.X, tile.Y, new TilePlacement(
+                    tileSet.Index,
+                    tile.TileId,
+                    TilePlacement.FormatAttributeValues(attributes)));
             }
         }
     }

@@ -69,7 +69,7 @@ public sealed class MapFileTileSet
 
     public string? AttributeListId { get; set; }
 
-    public Dictionary<int, int> TileAttributes { get; set; } = [];
+    public Dictionary<int, List<int>> TileAttributes { get; set; } = [];
 
     public Dictionary<string, object?> Attributes { get; set; } = [];
 
@@ -110,6 +110,8 @@ public sealed class MapFileTile
     public int TileId { get; set; }
 
     public int? Attribute { get; set; }
+
+    public List<int> AttributeValues { get; set; } = [];
 
     public Dictionary<string, object?> Attributes { get; set; } = [];
 

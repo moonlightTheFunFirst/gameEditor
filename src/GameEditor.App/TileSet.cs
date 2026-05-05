@@ -13,7 +13,7 @@ public sealed class TileSet : IDisposable
         int tileSize,
         Color? transparentColor,
         string? attributeListId,
-        Dictionary<int, int> tileAttributes)
+        Dictionary<int, string> tileAttributes)
     {
         Index = index;
         Id = id;
@@ -50,7 +50,7 @@ public sealed class TileSet : IDisposable
 
     public string? AttributeListId { get; set; }
 
-    public Dictionary<int, int> TileAttributes { get; }
+    public Dictionary<int, string> TileAttributes { get; }
 
     public int Columns { get; }
 
@@ -68,7 +68,7 @@ public sealed class TileSet : IDisposable
         int tileSize,
         Color? transparentColor = null,
         string? attributeListId = null,
-        Dictionary<int, int>? tileAttributes = null)
+        Dictionary<int, string>? tileAttributes = null)
     {
         if (tileSize <= 0)
         {
@@ -98,25 +98,28 @@ public sealed class TileSet : IDisposable
             tileAttributes ?? []);
     }
 
-    public int? GetDefaultAttribute(int tileId)
+    public IReadOnlyList<int> GetDefaultAttributes(int tileId)
     {
-        return TileAttributes.TryGetValue(tileId, out var value) ? value : null;
+        return TileAttributes.TryGetValue(tileId, out var value)
+            ? TilePlacement.ParseAttributeValues(value)
+            : [];
     }
 
-    public void SetDefaultAttribute(int tileId, int? value)
+    public void SetDefaultAttributes(int tileId, IEnumerable<int> values)
     {
         if (tileId < 0 || tileId >= TileCount)
         {
             return;
         }
 
-        if (value is null)
+        var csv = TilePlacement.FormatAttributeValues(values);
+        if (string.IsNullOrEmpty(csv))
         {
             TileAttributes.Remove(tileId);
             return;
         }
 
-        TileAttributes[tileId] = value.Value;
+        TileAttributes[tileId] = csv;
     }
 
     public Rectangle GetSourceRectangle(int tileId)

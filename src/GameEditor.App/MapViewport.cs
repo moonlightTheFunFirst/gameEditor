@@ -85,7 +85,7 @@ public sealed class MapViewport : ScrollableControl
 
     [System.ComponentModel.Browsable(false)]
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
-    public int? SelectedAttributeValue { get; set; }
+    public IReadOnlyList<int> SelectedAttributeValues { get; set; } = [];
 
     protected override void OnPaint(PaintEventArgs e)
     {
@@ -139,6 +139,46 @@ public sealed class MapViewport : ScrollableControl
             activeMouseButton = MouseButtons.None;
             lastEditedCell = null;
         }
+    }
+
+    protected override void OnMouseDoubleClick(MouseEventArgs e)
+    {
+        base.OnMouseDoubleClick(e);
+
+        if (document is null || selectedTileSet is null || e.Button != MouseButtons.Left)
+        {
+            return;
+        }
+
+        var cell = GetCellFromLocation(e.Location);
+        if (!document.IsInside(cell.X, cell.Y))
+        {
+            return;
+        }
+
+        var current = document.GetTile(selectedTileSet.Kind, cell.X, cell.Y);
+        if (current.IsEmpty)
+        {
+            return;
+        }
+
+        using var dialog = new AttributeSetEditorDialog(document.ActiveAttributeList, current.AttributeValues);
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        var change = document.SetAttributesWithChange(selectedTileSet.Kind, cell.X, cell.Y, dialog.SelectedValues);
+        if (change is null)
+        {
+            return;
+        }
+
+        Invalidate(GetInvalidationRectangle(cell.X, cell.Y));
+        EditCommandCommitted?.Invoke(
+            this,
+            new AttributeEditCommand(GetCommandName(MapEditTool.Attribute), selectedTileSet.Kind, [change.Value]));
+        EditApplied?.Invoke(this, new MapEditAppliedEventArgs(MapEditTool.Attribute, selectedTileSet.Kind, cell, 1));
     }
 
     private void ApplyToolAt(Point location, MouseButtons button, bool isDrag)
@@ -228,7 +268,10 @@ public sealed class MapViewport : ScrollableControl
             return;
         }
 
-        var placement = new TilePlacement(selectedTileSet.Index, selectedTileId, selectedTileSet.GetDefaultAttribute(selectedTileId));
+        var placement = new TilePlacement(
+            selectedTileSet.Index,
+            selectedTileId,
+            TilePlacement.FormatAttributeValues(selectedTileSet.GetDefaultAttributes(selectedTileId)));
         var current = document.GetTile(selectedTileSet.Kind, cell.X, cell.Y);
         if (current == placement)
         {
@@ -283,7 +326,10 @@ public sealed class MapViewport : ScrollableControl
             return;
         }
 
-        var placement = new TilePlacement(selectedTileSet.Index, selectedTileId, selectedTileSet.GetDefaultAttribute(selectedTileId));
+        var placement = new TilePlacement(
+            selectedTileSet.Index,
+            selectedTileId,
+            TilePlacement.FormatAttributeValues(selectedTileSet.GetDefaultAttributes(selectedTileId)));
         var changes = document.FloodFillWithChanges(selectedTileSet.Kind, cell.X, cell.Y, placement);
         if (changes.Count == 0)
         {
@@ -306,7 +352,7 @@ public sealed class MapViewport : ScrollableControl
             return;
         }
 
-        var change = document.SetAttributeWithChange(selectedTileSet.Kind, cell.X, cell.Y, SelectedAttributeValue);
+        var change = document.SetAttributesWithChange(selectedTileSet.Kind, cell.X, cell.Y, SelectedAttributeValues);
         if (change is null)
         {
             lastEditedCell = cell;
@@ -498,24 +544,55 @@ public sealed class MapViewport : ScrollableControl
         }
 
         var placement = document.GetTile(kind, x, y);
-        if (placement.AttributeValue is not { } attributeValue || attributeValue == 0)
+        var attributeValues = placement.AttributeValues;
+        if (attributeValues.Count == 0)
         {
             return;
         }
 
-        var color = list.FindValue(attributeValue)?.Color ?? Color.FromArgb(120, 255, 220, 40);
-        if (color.A == 0)
+        using (var dimBrush = new SolidBrush(Color.FromArgb(92, 0, 0, 0)))
         {
-            color = Color.FromArgb(120, color.R, color.G, color.B);
+            graphics.FillRectangle(
+                dimBrush,
+                x * document.TileSize,
+                y * document.TileSize,
+                document.TileSize,
+                document.TileSize);
         }
 
-        using var brush = new SolidBrush(Color.FromArgb(Math.Min((int)color.A, 120), color.R, color.G, color.B));
-        graphics.FillRectangle(
-            brush,
+        DrawAttributeLabel(graphics, GetAttributeAbbreviation(attributeValues, list), new Rectangle(
             x * document.TileSize,
             y * document.TileSize,
             document.TileSize,
-            document.TileSize);
+            document.TileSize));
+    }
+
+    private void DrawAttributeLabel(Graphics graphics, string label, Rectangle destination)
+    {
+        using var font = new Font(Font.FontFamily, Math.Max(6f, Math.Min(8f, destination.Height / 4f)), FontStyle.Bold);
+        using var format = new StringFormat
+        {
+            Alignment = StringAlignment.Center,
+            LineAlignment = StringAlignment.Center,
+            Trimming = StringTrimming.EllipsisCharacter,
+            FormatFlags = StringFormatFlags.NoWrap
+        };
+        var rect = destination;
+        rect.Inflate(-2, -2);
+        using var shadowBrush = new SolidBrush(Color.FromArgb(220, 0, 0, 0));
+        using var textBrush = new SolidBrush(Color.White);
+        var shadow = rect;
+        shadow.Offset(1, 1);
+        graphics.DrawString(label, font, shadowBrush, shadow, format);
+        graphics.DrawString(label, font, textBrush, rect, format);
+    }
+
+    private static string GetAttributeAbbreviation(IReadOnlyList<int> values, AttributeListDefinition list)
+    {
+        return string.Join("", values.Select(value =>
+            list.FindValue(value)?.Name is { Length: > 0 } name
+                ? name[0].ToString().ToUpperInvariant()
+                : value.ToString()));
     }
 
     private void DrawGrid(Graphics graphics)
