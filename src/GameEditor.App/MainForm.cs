@@ -1147,6 +1147,7 @@ public sealed class MainForm : Form
 
         viewport.SelectedTileSet = tileSet;
         viewport.SelectedTileId = activePalette.SelectedTileId;
+        viewport.SelectedTileSelection = activePalette.SelectedTileSelection;
         viewport.SelectedAttributeValues = GetSelectedAttributeValues();
         viewport.EditTool = currentEditTool;
         viewport.SecondaryEditTool = currentSecondaryEditTool;

@@ -12,6 +12,7 @@ public sealed class MapViewport : ScrollableControl
     private readonly List<AttributeChange> pendingAttributeChanges = [];
     private MapEditTool pendingStrokeTool;
     private TileSetKind? pendingStrokeLayerKind;
+    private IReadOnlyList<TileSelectionCell> selectedTileSelection = [];
 
     public MapViewport()
     {
@@ -86,6 +87,14 @@ public sealed class MapViewport : ScrollableControl
     [System.ComponentModel.Browsable(false)]
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public IReadOnlyList<int> SelectedAttributeValues { get; set; } = [];
+
+    [System.ComponentModel.Browsable(false)]
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public IReadOnlyList<TileSelectionCell> SelectedTileSelection
+    {
+        get => selectedTileSelection;
+        set => selectedTileSelection = value.ToArray();
+    }
 
     protected override void OnPaint(PaintEventArgs e)
     {
@@ -272,6 +281,13 @@ public sealed class MapViewport : ScrollableControl
             selectedTileSet.Index,
             selectedTileId,
             TilePlacement.FormatAttributeValues(selectedTileSet.GetDefaultAttributes(selectedTileId)));
+
+        if (selectedTileSelection.Count > 1)
+        {
+            ApplyTileSelection(cell);
+            return;
+        }
+
         var current = document.GetTile(selectedTileSet.Kind, cell.X, cell.Y);
         if (current == placement)
         {
@@ -290,6 +306,53 @@ public sealed class MapViewport : ScrollableControl
         lastEditedCell = cell;
         Invalidate(GetInvalidationRectangle(cell.X, cell.Y));
         EditApplied?.Invoke(this, new MapEditAppliedEventArgs(MapEditTool.Pen, selectedTileSet.Kind, cell, 1));
+    }
+
+    private void ApplyTileSelection(Point cell)
+    {
+        if (document is null || selectedTileSet is null)
+        {
+            return;
+        }
+
+        var changes = new List<TileChange>();
+        var invalidation = Rectangle.Empty;
+        foreach (var selectionCell in selectedTileSelection)
+        {
+            var x = cell.X + selectionCell.OffsetX;
+            var y = cell.Y + selectionCell.OffsetY;
+            if (!document.IsInside(x, y))
+            {
+                continue;
+            }
+
+            var placement = new TilePlacement(
+                selectedTileSet.Index,
+                selectionCell.TileId,
+                TilePlacement.FormatAttributeValues(selectedTileSet.GetDefaultAttributes(selectionCell.TileId)));
+            if (document.SetTileWithChange(selectedTileSet.Kind, x, y, placement) is not { } change)
+            {
+                continue;
+            }
+
+            changes.Add(change);
+            var tileInvalidation = GetInvalidationRectangle(x, y);
+            invalidation = invalidation.IsEmpty ? tileInvalidation : Rectangle.Union(invalidation, tileInvalidation);
+        }
+
+        lastEditedCell = cell;
+        if (changes.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var change in changes)
+        {
+            AddStrokeChange(change);
+        }
+
+        Invalidate(invalidation);
+        EditApplied?.Invoke(this, new MapEditAppliedEventArgs(MapEditTool.Pen, selectedTileSet.Kind, cell, changes.Count));
     }
 
     private void ApplyEraser(Point cell)

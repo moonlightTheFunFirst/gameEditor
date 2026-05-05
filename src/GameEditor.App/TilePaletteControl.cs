@@ -7,6 +7,12 @@ public sealed class TilePaletteControl : ScrollableControl
     private bool attributeMode;
     private AttributeListDefinition? attributeList;
     private IReadOnlyList<int> selectedAttributeValues = [];
+    private Point selectionStartCell;
+    private Point selectionEndCell;
+    private bool rangeDragActive;
+    private Point rangeDragStartCell;
+    private Point rangeDragCurrentCell;
+    private MouseButtons rangeDragButton;
 
     public TilePaletteControl()
     {
@@ -31,6 +37,8 @@ public sealed class TilePaletteControl : ScrollableControl
         {
             tileSet = value;
             selectedTileId = value is null ? -1 : 0;
+            selectionStartCell = Point.Empty;
+            selectionEndCell = Point.Empty;
             UpdateScrollSize();
             Invalidate();
             SelectedTileChanged?.Invoke(this, EventArgs.Empty);
@@ -48,6 +56,7 @@ public sealed class TilePaletteControl : ScrollableControl
             }
 
             selectedTileId = value;
+            SetSelectionToTile(value);
             Invalidate();
             SelectedTileChanged?.Invoke(this, EventArgs.Empty);
         }
@@ -90,6 +99,10 @@ public sealed class TilePaletteControl : ScrollableControl
         set => selectedAttributeValues = value.Distinct().Order().ToArray();
     }
 
+    [System.ComponentModel.Browsable(false)]
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public IReadOnlyList<TileSelectionCell> SelectedTileSelection => GetSelectedTileSelection();
+
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
@@ -117,6 +130,7 @@ public sealed class TilePaletteControl : ScrollableControl
         }
 
         DrawSelection(e.Graphics);
+        DrawRangeDrag(e.Graphics);
         DrawGrid(e.Graphics);
     }
 
@@ -129,6 +143,11 @@ public sealed class TilePaletteControl : ScrollableControl
             return;
         }
 
+        if (TryBeginRangeDrag(e.Location, e.Button))
+        {
+            return;
+        }
+
         ApplyMouseAction(e.Location, e.Button);
     }
 
@@ -136,12 +155,37 @@ public sealed class TilePaletteControl : ScrollableControl
     {
         base.OnMouseMove(e);
 
-        if (!attributeMode || tileSet is null || e.Button == MouseButtons.None)
+        if (tileSet is null || e.Button == MouseButtons.None)
+        {
+            return;
+        }
+
+        if (rangeDragActive)
+        {
+            UpdateRangeDrag(e.Location);
+            return;
+        }
+
+        if (!attributeMode)
         {
             return;
         }
 
         ApplyMouseAction(e.Location, e.Button);
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        base.OnMouseUp(e);
+
+        if (!rangeDragActive || e.Button != rangeDragButton)
+        {
+            return;
+        }
+
+        CommitRangeDrag();
+        rangeDragActive = false;
+        Invalidate(GetRangeInvalidationRectangle(rangeDragStartCell, rangeDragCurrentCell));
     }
 
     protected override void OnMouseDoubleClick(MouseEventArgs e)
@@ -169,6 +213,85 @@ public sealed class TilePaletteControl : ScrollableControl
         ApplyAttributeValues(tileId, dialog.SelectedValues);
     }
 
+    private bool TryBeginRangeDrag(Point location, MouseButtons button)
+    {
+        if (tileSet is null || !IsRangeDragModifierActive())
+        {
+            return false;
+        }
+
+        if (button != MouseButtons.Left && (button != MouseButtons.Right || !attributeMode))
+        {
+            return false;
+        }
+
+        var tileId = GetTileIdFromLocation(location);
+        if (tileId < 0)
+        {
+            return false;
+        }
+
+        var cell = GetCellFromTileId(tileId);
+        rangeDragActive = true;
+        rangeDragButton = button;
+        rangeDragStartCell = cell;
+        rangeDragCurrentCell = cell;
+        Invalidate(GetRangeInvalidationRectangle(cell, cell));
+        return true;
+    }
+
+    private void UpdateRangeDrag(Point location)
+    {
+        if (tileSet is null)
+        {
+            return;
+        }
+
+        var cell = GetCellFromLocation(location);
+        cell = new Point(
+            Math.Clamp(cell.X, 0, tileSet.Columns - 1),
+            Math.Clamp(cell.Y, 0, tileSet.Rows - 1));
+
+        if (cell == rangeDragCurrentCell)
+        {
+            return;
+        }
+
+        var previousRectangle = GetRangeInvalidationRectangle(rangeDragStartCell, rangeDragCurrentCell);
+        rangeDragCurrentCell = cell;
+        Invalidate(previousRectangle);
+        Invalidate(GetRangeInvalidationRectangle(rangeDragStartCell, rangeDragCurrentCell));
+    }
+
+    private void CommitRangeDrag()
+    {
+        if (tileSet is null)
+        {
+            return;
+        }
+
+        if (!attributeMode)
+        {
+            SetSelectionRange(rangeDragStartCell, rangeDragCurrentCell);
+            return;
+        }
+
+        IReadOnlyList<int> values = rangeDragButton == MouseButtons.Right ? [] : selectedAttributeValues;
+        var changedCount = 0;
+        foreach (var tileId in GetTileIdsInRange(rangeDragStartCell, rangeDragCurrentCell))
+        {
+            if (ApplyAttributeValues(tileId, values))
+            {
+                changedCount++;
+            }
+        }
+
+        if (changedCount > 0)
+        {
+            SelectedTileChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
     private void ApplyMouseAction(Point location, MouseButtons button)
     {
         var tileId = GetTileIdFromLocation(location);
@@ -180,6 +303,7 @@ public sealed class TilePaletteControl : ScrollableControl
         SelectedTileId = tileId;
         if (!attributeMode)
         {
+            SetSelectionToTile(tileId);
             return;
         }
 
@@ -192,22 +316,23 @@ public sealed class TilePaletteControl : ScrollableControl
         ApplyAttributeValues(tileId, values);
     }
 
-    private void ApplyAttributeValues(int tileId, IReadOnlyList<int> values)
+    private bool ApplyAttributeValues(int tileId, IReadOnlyList<int> values)
     {
         if (tileSet is null)
         {
-            return;
+            return false;
         }
 
         var normalized = values.Distinct().Order().ToArray();
         if (TilePlacement.FormatAttributeValues(tileSet.GetDefaultAttributes(tileId)) == TilePlacement.FormatAttributeValues(normalized))
         {
-            return;
+            return false;
         }
 
         tileSet.SetDefaultAttributes(tileId, normalized);
         Invalidate(GetTileRectangle(tileId));
         TileAttributeChanged?.Invoke(this, new TileAttributeChangedEventArgs(tileSet, tileId, normalized));
+        return true;
     }
 
     private void UpdateScrollSize()
@@ -227,6 +352,28 @@ public sealed class TilePaletteControl : ScrollableControl
         var column = tileId % tileSet.Columns;
         var row = tileId / tileSet.Columns;
         return new Rectangle(column * tileSet.TileSize, row * tileSet.TileSize, tileSet.TileSize, tileSet.TileSize);
+    }
+
+    private Point GetCellFromTileId(int tileId)
+    {
+        if (tileSet is null || tileId < 0)
+        {
+            return Point.Empty;
+        }
+
+        return new Point(tileId % tileSet.Columns, tileId / tileSet.Columns);
+    }
+
+    private Point GetCellFromLocation(Point location)
+    {
+        if (tileSet is null)
+        {
+            return new Point(-1, -1);
+        }
+
+        var x = location.X - AutoScrollPosition.X;
+        var y = location.Y - AutoScrollPosition.Y;
+        return new Point(x / tileSet.TileSize, y / tileSet.TileSize);
     }
 
     private int GetTileIdFromLocation(Point location)
@@ -344,7 +491,12 @@ public sealed class TilePaletteControl : ScrollableControl
             return;
         }
 
-        var rect = GetTileRectangle(selectedTileId);
+        var range = GetCellRange(selectionStartCell, selectionEndCell);
+        var rect = new Rectangle(
+            range.X * tileSet.TileSize,
+            range.Y * tileSet.TileSize,
+            range.Width * tileSet.TileSize,
+            range.Height * tileSet.TileSize);
         rect.Width -= 1;
         rect.Height -= 1;
 
@@ -353,6 +505,26 @@ public sealed class TilePaletteControl : ScrollableControl
         graphics.DrawRectangle(outerPen, rect);
         rect.Inflate(-2, -2);
         graphics.DrawRectangle(innerPen, rect);
+    }
+
+    private void DrawRangeDrag(Graphics graphics)
+    {
+        if (tileSet is null || !rangeDragActive)
+        {
+            return;
+        }
+
+        var range = GetCellRange(rangeDragStartCell, rangeDragCurrentCell);
+        var rect = new Rectangle(
+            range.X * tileSet.TileSize,
+            range.Y * tileSet.TileSize,
+            range.Width * tileSet.TileSize,
+            range.Height * tileSet.TileSize);
+
+        using var brush = new SolidBrush(Color.FromArgb(34, 255, 224, 64));
+        using var pen = new Pen(Color.FromArgb(255, 255, 224, 64), 2f);
+        graphics.FillRectangle(brush, rect);
+        graphics.DrawRectangle(pen, rect.X, rect.Y, rect.Width - 1, rect.Height - 1);
     }
 
     private void DrawGrid(Graphics graphics)
@@ -384,5 +556,110 @@ public sealed class TilePaletteControl : ScrollableControl
         using var brush = new SolidBrush(Color.FromArgb(180, 184, 190));
         var size = graphics.MeasureString(message, Font);
         graphics.DrawString(message, Font, brush, (Width - size.Width) / 2f, (Height - size.Height) / 2f);
+    }
+
+    private void SetSelectionToTile(int tileId)
+    {
+        selectionStartCell = GetCellFromTileId(tileId);
+        selectionEndCell = selectionStartCell;
+    }
+
+    private void SetSelectionRange(Point start, Point end)
+    {
+        if (tileSet is null)
+        {
+            return;
+        }
+
+        var range = GetCellRange(start, end);
+        var firstTileId = range.Top * tileSet.Columns + range.Left;
+        if (firstTileId >= tileSet.TileCount)
+        {
+            return;
+        }
+
+        selectedTileId = firstTileId;
+        selectionStartCell = new Point(range.Left, range.Top);
+        selectionEndCell = new Point(range.Right - 1, range.Bottom - 1);
+        Invalidate();
+        SelectedTileChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private IReadOnlyList<TileSelectionCell> GetSelectedTileSelection()
+    {
+        if (tileSet is null || selectedTileId < 0)
+        {
+            return [];
+        }
+
+        var range = GetCellRange(selectionStartCell, selectionEndCell);
+        var cells = new List<TileSelectionCell>();
+        for (var row = range.Top; row < range.Bottom; row++)
+        {
+            for (var column = range.Left; column < range.Right; column++)
+            {
+                var tileId = row * tileSet.Columns + column;
+                if (tileId >= tileSet.TileCount)
+                {
+                    continue;
+                }
+
+                cells.Add(new TileSelectionCell(column - range.Left, row - range.Top, tileId));
+            }
+        }
+
+        return cells.Count == 0 ? [new TileSelectionCell(0, 0, selectedTileId)] : cells;
+    }
+
+    private IEnumerable<int> GetTileIdsInRange(Point start, Point end)
+    {
+        if (tileSet is null)
+        {
+            yield break;
+        }
+
+        var range = GetCellRange(start, end);
+        for (var row = range.Top; row < range.Bottom; row++)
+        {
+            for (var column = range.Left; column < range.Right; column++)
+            {
+                var tileId = row * tileSet.Columns + column;
+                if (tileId < tileSet.TileCount)
+                {
+                    yield return tileId;
+                }
+            }
+        }
+    }
+
+    private Rectangle GetRangeInvalidationRectangle(Point start, Point end)
+    {
+        if (tileSet is null)
+        {
+            return ClientRectangle;
+        }
+
+        var range = GetCellRange(start, end);
+        var rectangle = new Rectangle(
+            range.X * tileSet.TileSize + AutoScrollPosition.X,
+            range.Y * tileSet.TileSize + AutoScrollPosition.Y,
+            range.Width * tileSet.TileSize + 1,
+            range.Height * tileSet.TileSize + 1);
+        rectangle.Inflate(3, 3);
+        return rectangle;
+    }
+
+    private static Rectangle GetCellRange(Point start, Point end)
+    {
+        var left = Math.Min(start.X, end.X);
+        var top = Math.Min(start.Y, end.Y);
+        var right = Math.Max(start.X, end.X);
+        var bottom = Math.Max(start.Y, end.Y);
+        return Rectangle.FromLTRB(left, top, right + 1, bottom + 1);
+    }
+
+    private static bool IsRangeDragModifierActive()
+    {
+        return (ModifierKeys & Keys.Shift) == Keys.Shift;
     }
 }
