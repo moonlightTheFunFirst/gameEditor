@@ -1923,6 +1923,7 @@ public sealed class MainForm : Form
             MapSerializer.Save(path, document.Map, document.TileSets, document.Name);
             document.IsDirty = false;
             UpdateDocumentTabTitle(document);
+            UpdateDocumentActionsState();
             statusLabel.Text = $"保存しました: {Path.GetFileName(path)}";
             RefreshProperties();
             return true;
@@ -2278,7 +2279,18 @@ public sealed class MainForm : Form
     {
         var document = CurrentDocument;
         var hasDocument = document is not null;
+        var canSave = hasDocument;
         var hasPalette = activeEditorKind == ActiveEditorKind.Map && activePalette?.TileSet is not null;
+        if (mapToolStripItems.Count > 2)
+        {
+            mapToolStripItems[2].Enabled = canSave;
+        }
+
+        if (mapMenu.DropDownItems.Count > 2)
+        {
+            mapMenu.DropDownItems[2].Enabled = canSave;
+        }
+
         undoButton.Enabled = document?.History.CanUndo == true;
         redoButton.Enabled = document?.History.CanRedo == true;
         undoMenuItem.Enabled = undoButton.Enabled;
