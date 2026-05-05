@@ -64,6 +64,18 @@ public sealed class MainForm : Form
     private readonly List<TileSetDefinition> advancedTileSetDefinitions = [];
     private TileSet? previewBaseTileSet;
     private TileSet? previewAdvancedTileSet;
+    private readonly List<AttributeListDefinition> editorAttributeLists =
+    [
+        new AttributeListDefinition(
+            "default",
+            "Default",
+            [
+                new AttributeDefinition(0, "None", Color.Transparent),
+                new AttributeDefinition(1, "Blocked", Color.FromArgb(160, 220, 50, 50)),
+                new AttributeDefinition(2, "Event", Color.FromArgb(160, 80, 160, 255))
+            ])
+    ];
+    private string? editorActiveAttributeListId = "default";
     private bool updatingTileSetSelectors;
     private bool suppressDocumentActivation;
     private ProjectDocument? currentProject;
@@ -468,6 +480,8 @@ public sealed class MainForm : Form
         workspaceSplit.BringToFront();
         UpdateMapWorkspaceState();
         ApplyInitialTilePanelWidth();
+        UpdatePaletteAttributeContext(CurrentDocument);
+        UpdateDocumentActionsState();
     }
 
     private void ShowEmptyWorkspace(string message, ActiveEditorKind editorKind = ActiveEditorKind.None)
@@ -743,6 +757,18 @@ public sealed class MainForm : Form
             dialog.MapName,
             new MapDocument(dialog.MapWidth, dialog.MapHeight, dialog.TileSize),
             tileSets);
+        document.Map.AttributeLists = editorAttributeLists
+            .Select(list => new AttributeListDefinition(
+                list.Id,
+                list.Name,
+                list.Values.Select(value => new AttributeDefinition(value.Value, value.Name, value.Color)).ToList()))
+            .ToList();
+        document.Map.ActiveAttributeListId = editorActiveAttributeListId;
+        foreach (var tileSet in document.TileSets)
+        {
+            tileSet.AttributeListId ??= document.Map.ActiveAttributeListId;
+        }
+
         var attachToProject = IsProjectMapContextSelected();
         ShowMapEditorWorkspace(attachToProject);
         AddDocumentTab(document);
@@ -1112,14 +1138,21 @@ public sealed class MainForm : Form
 
     private void UpdatePaletteAttributeContext(MapEditorDocument? document)
     {
-        var list = document?.Map.ActiveAttributeList;
+        var list = GetActiveAttributeList(document);
         var values = GetSelectedAttributeValues();
         basePalette.AttributeList = list;
         advancedPalette.AttributeList = list;
         basePalette.SelectedAttributeValues = values;
         advancedPalette.SelectedAttributeValues = values;
-        basePalette.AttributeMode = paletteAttributeModeButton.Checked && document is not null;
-        advancedPalette.AttributeMode = paletteAttributeModeButton.Checked && document is not null;
+        basePalette.AttributeMode = paletteAttributeModeButton.Checked;
+        advancedPalette.AttributeMode = paletteAttributeModeButton.Checked;
+    }
+
+    private AttributeListDefinition? GetActiveAttributeList(MapEditorDocument? document)
+    {
+        return document?.Map.ActiveAttributeList
+            ?? editorAttributeLists.FirstOrDefault(list => list.Id == editorActiveAttributeListId)
+            ?? editorAttributeLists.FirstOrDefault();
     }
 
     private void SetPaletteAttributeMode(bool enabled)
@@ -1132,7 +1165,7 @@ public sealed class MainForm : Form
 
     private void RefreshAttributeValueSelector(MapEditorDocument? document)
     {
-        attributeSetButton.Text = $"属性: {FormatAttributeSet(GetSelectedAttributeValues(), document?.Map.ActiveAttributeList)}";
+        attributeSetButton.Text = $"属性: {FormatAttributeSet(GetSelectedAttributeValues(), GetActiveAttributeList(document))}";
     }
 
     private IReadOnlyList<int> selectedAttributeValues = [];
@@ -1145,12 +1178,7 @@ public sealed class MainForm : Form
     private void EditSelectedAttributeSet()
     {
         var document = CurrentDocument;
-        if (document is null)
-        {
-            return;
-        }
-
-        using var dialog = new AttributeSetEditorDialog(document.Map.ActiveAttributeList, selectedAttributeValues);
+        using var dialog = new AttributeSetEditorDialog(GetActiveAttributeList(document), selectedAttributeValues);
         if (dialog.ShowDialog(this) != DialogResult.OK)
         {
             return;
@@ -1169,6 +1197,11 @@ public sealed class MainForm : Form
         var document = CurrentDocument;
         if (document is null)
         {
+            args.TileSet.AttributeListId = editorActiveAttributeListId;
+            RefreshProperties();
+            statusLabel.Text = args.AttributeValues.Count > 0
+                ? $"Tile {args.TileId} attributes: {FormatAttributeSet(args.AttributeValues, GetActiveAttributeList(null))}"
+                : $"Tile {args.TileId} attribute cleared";
             return;
         }
 
@@ -1186,23 +1219,31 @@ public sealed class MainForm : Form
     private void EditAttributeLists()
     {
         var document = CurrentDocument;
-        if (document is null)
-        {
-            return;
-        }
-
-        using var dialog = new AttributeListEditorDialog(document.Map.AttributeLists);
+        using var dialog = new AttributeListEditorDialog(document?.Map.AttributeLists ?? editorAttributeLists);
         if (dialog.ShowDialog(this) != DialogResult.OK)
         {
             return;
         }
 
-        document.Map.AttributeLists = dialog.AttributeLists
+        var editedLists = dialog.AttributeLists
             .Select(list => new AttributeListDefinition(
                 list.Id,
                 list.Name,
                 list.Values.Select(value => new AttributeDefinition(value.Value, value.Name, value.Color)).ToList()))
             .ToList();
+        if (document is null)
+        {
+            editorAttributeLists.Clear();
+            editorAttributeLists.AddRange(editedLists);
+            editorActiveAttributeListId = editorAttributeLists.FirstOrDefault()?.Id;
+            ApplyActiveAttributeListToPreviewTileSets();
+            RefreshAttributeValueSelector(null);
+            UpdatePaletteAttributeContext(null);
+            RefreshProperties();
+            return;
+        }
+
+        document.Map.AttributeLists = editedLists;
         document.Map.ActiveAttributeListId = document.Map.AttributeLists.FirstOrDefault()?.Id;
         foreach (var tileSet in document.TileSets)
         {
@@ -1221,14 +1262,21 @@ public sealed class MainForm : Form
     private void SetSelectedTileDefaultAttribute()
     {
         var document = CurrentDocument;
-        if (document is null || activePalette?.TileSet is not { } tileSet || activePalette.SelectedTileId < 0)
+        if (activePalette?.TileSet is not { } tileSet || activePalette.SelectedTileId < 0)
         {
             return;
         }
 
-        tileSet.AttributeListId = document.Map.ActiveAttributeListId;
+        tileSet.AttributeListId = document?.Map.ActiveAttributeListId ?? editorActiveAttributeListId;
         tileSet.SetDefaultAttributes(activePalette.SelectedTileId, GetSelectedAttributeValues());
         activePalette.Invalidate();
+        if (document is null)
+        {
+            RefreshProperties();
+            statusLabel.Text = $"Tile {activePalette.SelectedTileId} attribute set";
+            return;
+        }
+
         document.IsDirty = true;
         MarkProjectDirtyForDocument(document);
         UpdateDocumentTabTitle(document);
@@ -1298,6 +1346,7 @@ public sealed class MainForm : Form
         {
             SetPreviewTileSet(kind, definition);
             activePalette = tileSetTabs.SelectedIndex == 1 ? advancedPalette : basePalette;
+            UpdatePaletteAttributeContext(null);
             UpdateSelectedTile();
             return;
         }
@@ -1323,11 +1372,13 @@ public sealed class MainForm : Form
         var advancedDefinition = GetSelectedTileSetDefinition(TileSetKind.Advanced)
             ?? throw new InvalidOperationException("Advanced tileset is not loaded.");
 
-        return
-        [
-            CreateTileSet(baseDefinition, GetTileSetIndex(TileSetKind.Base), tileSize),
-            CreateTileSet(advancedDefinition, GetTileSetIndex(TileSetKind.Advanced), tileSize)
-        ];
+        var baseTileSet = CreateTileSet(baseDefinition, GetTileSetIndex(TileSetKind.Base), tileSize);
+        var advancedTileSet = CreateTileSet(advancedDefinition, GetTileSetIndex(TileSetKind.Advanced), tileSize);
+        CopyTileAttributes(previewBaseTileSet, baseTileSet);
+        CopyTileAttributes(previewAdvancedTileSet, advancedTileSet);
+        baseTileSet.AttributeListId ??= editorActiveAttributeListId;
+        advancedTileSet.AttributeListId ??= editorActiveAttributeListId;
+        return [baseTileSet, advancedTileSet];
     }
 
     private void ApplyCatalogTileSets(MapEditorDocument document, bool markDirty)
@@ -1363,6 +1414,33 @@ public sealed class MainForm : Form
             document.IsDirty = true;
             MarkProjectDirtyForDocument(document);
             UpdateDocumentTabTitle(document);
+        }
+    }
+
+    private static void CopyTileAttributes(TileSet? source, TileSet destination)
+    {
+        if (source is null)
+        {
+            return;
+        }
+
+        destination.AttributeListId = source.AttributeListId;
+        foreach (var (tileId, value) in source.TileAttributes)
+        {
+            destination.SetDefaultAttributes(tileId, TilePlacement.ParseAttributeValues(value));
+        }
+    }
+
+    private void ApplyActiveAttributeListToPreviewTileSets()
+    {
+        if (previewBaseTileSet is not null)
+        {
+            previewBaseTileSet.AttributeListId = editorActiveAttributeListId;
+        }
+
+        if (previewAdvancedTileSet is not null)
+        {
+            previewAdvancedTileSet.AttributeListId = editorActiveAttributeListId;
         }
     }
 
@@ -1430,11 +1508,16 @@ public sealed class MainForm : Form
         }
 
         activePalette = tileSetTabs.SelectedIndex == 1 ? advancedPalette : basePalette;
+        UpdatePaletteAttributeContext(null);
+        RefreshAttributeValueSelector(null);
     }
 
     private void SetPreviewTileSet(TileSetKind kind, TileSetDefinition definition)
     {
+        var current = kind == TileSetKind.Base ? previewBaseTileSet : previewAdvancedTileSet;
         var replacement = CreateTileSet(definition, GetTileSetIndex(kind), InitialTileSize);
+        CopyTileAttributes(current, replacement);
+        replacement.AttributeListId ??= editorActiveAttributeListId;
 
         if (kind == TileSetKind.Base)
         {
@@ -2068,6 +2151,7 @@ public sealed class MainForm : Form
     {
         var document = CurrentDocument;
         var hasDocument = document is not null;
+        var hasPalette = activeEditorKind == ActiveEditorKind.Map && activePalette?.TileSet is not null;
         undoButton.Enabled = document?.History.CanUndo == true;
         redoButton.Enabled = document?.History.CanRedo == true;
         undoMenuItem.Enabled = undoButton.Enabled;
@@ -2079,10 +2163,10 @@ public sealed class MainForm : Form
         eraserToolButton.Enabled = hasDocument;
         selectToolButton.Enabled = hasDocument;
         attributeToolButton.Enabled = hasDocument;
-        paletteAttributeModeButton.Enabled = hasDocument;
-        attributeSetButton.Enabled = hasDocument;
-        setTileAttributeButton.Enabled = hasDocument;
-        editAttributeListsButton.Enabled = hasDocument;
+        paletteAttributeModeButton.Enabled = hasPalette;
+        attributeSetButton.Enabled = hasPalette;
+        setTileAttributeButton.Enabled = hasPalette;
+        editAttributeListsButton.Enabled = activeEditorKind == ActiveEditorKind.Map;
         RefreshProperties();
     }
 
