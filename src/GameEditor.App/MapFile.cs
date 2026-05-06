@@ -137,6 +137,10 @@ public sealed class MapFileAttributeValue
 
     public string Name { get; set; } = "";
 
+    public string DisplayText { get; set; } = "";
+
+    public string Memo { get; set; } = "";
+
     public string? Color { get; set; }
 
     [JsonExtensionData]

@@ -931,8 +931,8 @@ public sealed class MapViewport : ScrollableControl
     private static string GetAttributeAbbreviation(IReadOnlyList<int> values, AttributeListDefinition list)
     {
         return string.Join("", values.Select(value =>
-            list.FindValue(value)?.Name is { Length: > 0 } name
-                ? name[0].ToString().ToUpperInvariant()
+            list.FindValue(value) is { } definition
+                ? definition.GetDisplayText()
                 : value.ToString()));
     }
 

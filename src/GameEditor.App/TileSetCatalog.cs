@@ -74,6 +74,7 @@ public static class TileSetCatalog
         };
 
         var json = JsonSerializer.Serialize(file, JsonOptions);
+        Directory.CreateDirectory(Path.GetDirectoryName(definition.AttributeFilePath) ?? ".");
         File.WriteAllText(definition.AttributeFilePath, json);
     }
 
@@ -110,7 +111,9 @@ public static class TileSetCatalog
             list.Values.Select(value => new AttributeDefinition(
                 value.Value,
                 value.Name,
-                ParseHexColor(value.Color) ?? Color.Transparent)).ToList());
+                ParseHexColor(value.Color) ?? Color.Transparent,
+                value.DisplayText,
+                value.Memo)).ToList());
     }
 
     private static MapFileAttributeList ToMapFileAttributeList(AttributeListDefinition list)
@@ -123,6 +126,8 @@ public static class TileSetCatalog
             {
                 Value = value.Value,
                 Name = value.Name,
+                DisplayText = value.DisplayText,
+                Memo = value.Memo,
                 Color = ToHexColor(value.Color)
             }).ToList()
         };
@@ -173,19 +178,30 @@ public static class TileSetCatalog
 
     private static string? ResolveTilesDirectory()
     {
-        var candidates = new List<string>
-        {
-            Path.Combine(AppContext.BaseDirectory, "resources", "tiles"),
-            Path.Combine(Environment.CurrentDirectory, "resources", "tiles")
-        };
+        var candidates = new List<string>();
+        AddTilesDirectoryCandidates(candidates, Environment.CurrentDirectory);
+        AddTilesDirectoryCandidates(candidates, AppContext.BaseDirectory);
 
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        return candidates
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(Directory.Exists)
+            .OrderBy(IsBuildOutputPath)
+            .FirstOrDefault();
+    }
+
+    private static void AddTilesDirectoryCandidates(List<string> candidates, string startPath)
+    {
+        var directory = new DirectoryInfo(startPath);
         while (directory is not null)
         {
             candidates.Add(Path.Combine(directory.FullName, "resources", "tiles"));
             directory = directory.Parent;
         }
+    }
 
-        return candidates.FirstOrDefault(Directory.Exists);
+    private static bool IsBuildOutputPath(string path)
+    {
+        var parts = path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return parts.Any(part => string.Equals(part, "bin", StringComparison.OrdinalIgnoreCase));
     }
 }

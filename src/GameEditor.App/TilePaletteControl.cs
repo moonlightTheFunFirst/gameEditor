@@ -472,8 +472,8 @@ public sealed class TilePaletteControl : ScrollableControl
     private string GetAttributeAbbreviation(IReadOnlyList<int> values)
     {
         var parts = values
-            .Select(value => attributeList?.FindValue(value)?.Name is { Length: > 0 } name
-                ? name[0].ToString().ToUpperInvariant()
+            .Select(value => attributeList?.FindValue(value) is { } definition
+                ? definition.GetDisplayText()
                 : value.ToString())
             .ToArray();
         return string.Join("", parts);

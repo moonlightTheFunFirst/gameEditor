@@ -107,6 +107,8 @@ public static class MapSerializer
             {
                 Value = value.Value,
                 Name = value.Name,
+                DisplayText = value.DisplayText,
+                Memo = value.Memo,
                 Color = ToHexColor(value.Color)
             }).ToList()
         };
@@ -212,7 +214,9 @@ public static class MapSerializer
             list.Values.Select(value => new AttributeDefinition(
                 value.Value,
                 value.Name,
-                ParseHexColor(value.Color) ?? Color.Transparent)).ToList())).ToList();
+                ParseHexColor(value.Color) ?? Color.Transparent,
+                value.DisplayText,
+                value.Memo)).ToList())).ToList();
         document.ActiveAttributeListId = document.AttributeLists.FirstOrDefault()?.Id;
     }
 

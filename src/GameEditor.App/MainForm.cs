@@ -602,6 +602,24 @@ public sealed class MainForm : Form
 
         baseTileSetDefinitions.AddRange(definitions.Where(definition => definition.Kind == TileSetKind.Base));
         advancedTileSetDefinitions.AddRange(definitions.Where(definition => definition.Kind == TileSetKind.Advanced));
+        LoadEditorAttributeListsFromTileSetDefinitions(definitions);
+    }
+
+    private void LoadEditorAttributeListsFromTileSetDefinitions(IReadOnlyList<TileSetDefinition> definitions)
+    {
+        var source = definitions.FirstOrDefault(definition => definition.AttributeLists.Count > 0);
+        if (source is null)
+        {
+            return;
+        }
+
+        editorAttributeLists.Clear();
+        editorAttributeLists.AddRange(source.AttributeLists.Select(list => new AttributeListDefinition(
+            list.Id,
+            list.Name,
+            list.Values.Select(value => new AttributeDefinition(value.Value, value.Name, value.Color, value.DisplayText, value.Memo)).ToList())));
+        editorActiveAttributeListId = source.AttributeListId
+            ?? editorAttributeLists.FirstOrDefault()?.Id;
     }
 
     private void ConfigureTileSetTabs()
@@ -777,7 +795,7 @@ public sealed class MainForm : Form
             .Select(list => new AttributeListDefinition(
                 list.Id,
                 list.Name,
-                list.Values.Select(value => new AttributeDefinition(value.Value, value.Name, value.Color)).ToList()))
+                list.Values.Select(value => new AttributeDefinition(value.Value, value.Name, value.Color, value.DisplayText, value.Memo)).ToList()))
             .ToList();
         document.Map.ActiveAttributeListId = editorActiveAttributeListId;
         foreach (var tileSet in document.TileSets)
@@ -1240,18 +1258,27 @@ public sealed class MainForm : Form
     private void EditAttributeLists()
     {
         var document = CurrentDocument;
-        using var dialog = new AttributeListEditorDialog(document?.Map.AttributeLists ?? editorAttributeLists);
+        using var dialog = new AttributeListEditorDialog(
+            document?.Map.AttributeLists ?? editorAttributeLists,
+            lists => ApplyEditedAttributeLists(lists, saveImmediately: true));
         if (dialog.ShowDialog(this) != DialogResult.OK)
         {
             return;
         }
 
-        var editedLists = dialog.AttributeLists
+        ApplyEditedAttributeLists(dialog.AttributeLists, saveImmediately: false);
+    }
+
+    private bool ApplyEditedAttributeLists(IReadOnlyList<AttributeListDefinition> source, bool saveImmediately)
+    {
+        var document = CurrentDocument;
+        var editedLists = source
             .Select(list => new AttributeListDefinition(
                 list.Id,
                 list.Name,
-                list.Values.Select(value => new AttributeDefinition(value.Value, value.Name, value.Color)).ToList()))
+                list.Values.Select(value => new AttributeDefinition(value.Value, value.Name, value.Color, value.DisplayText, value.Memo)).ToList()))
             .ToList();
+
         if (document is null)
         {
             editorAttributeLists.Clear();
@@ -1263,7 +1290,13 @@ public sealed class MainForm : Form
             RefreshAttributeValueSelector(null);
             UpdatePaletteAttributeContext(null);
             RefreshProperties();
-            return;
+            if (saveImmediately)
+            {
+                SaveDirtyTileAttributes();
+            }
+
+            return !dirtyTileAttributeKinds.Contains(TileSetKind.Base)
+                && !dirtyTileAttributeKinds.Contains(TileSetKind.Advanced);
         }
 
         document.Map.AttributeLists = editedLists;
@@ -1281,6 +1314,17 @@ public sealed class MainForm : Form
         UpdatePaletteAttributeContext(document);
         SyncCurrentViewportSelection();
         RefreshProperties();
+        if (saveImmediately)
+        {
+            SaveDirtyTileAttributes();
+            if (!TrySaveMap(document))
+            {
+                return false;
+            }
+        }
+
+        return !dirtyTileAttributeKinds.Contains(TileSetKind.Base)
+            && !dirtyTileAttributeKinds.Contains(TileSetKind.Advanced);
     }
 
     private void SetSelectedTileDefaultAttribute()
@@ -1337,6 +1381,14 @@ public sealed class MainForm : Form
         }
     }
 
+    private void SaveDirtyTileAttributes()
+    {
+        foreach (var kind in dirtyTileAttributeKinds.ToArray())
+        {
+            SaveTileAttributes(kind);
+        }
+    }
+
     private bool ConfirmSaveAllTileAttributes()
     {
         foreach (var kind in dirtyTileAttributeKinds.ToArray())
@@ -1360,7 +1412,7 @@ public sealed class MainForm : Form
         definition.AttributeLists.AddRange(attributeLists.Select(list => new AttributeListDefinition(
             list.Id,
             list.Name,
-            list.Values.Select(value => new AttributeDefinition(value.Value, value.Name, value.Color)).ToList())));
+            list.Values.Select(value => new AttributeDefinition(value.Value, value.Name, value.Color, value.DisplayText, value.Memo)).ToList())));
         definition.TileAttributes.Clear();
         foreach (var (tileId, value) in tileSet.TileAttributes)
         {
