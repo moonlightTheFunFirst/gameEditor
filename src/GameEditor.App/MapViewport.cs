@@ -14,6 +14,13 @@ public sealed class MapViewport : ScrollableControl
     private TileSetKind? pendingStrokeLayerKind;
     private IReadOnlyList<TileSelectionCell> selectedTileSelection = [];
     private Point? stampPreviewCell;
+    private readonly List<MapStampCell> mapStampCells = [];
+    private Size mapStampSize = new(1, 1);
+    private Rectangle? mapStampSourceRange;
+    private bool mapStampSelectionActive;
+    private Point mapStampSelectionStart;
+    private Point mapStampSelectionCurrent;
+    private TileSetKind? mapStampLayerKind;
 
     public MapViewport()
     {
@@ -22,6 +29,7 @@ public sealed class MapViewport : ScrollableControl
         DoubleBuffered = true;
         ResizeRedraw = true;
         AutoScroll = true;
+        TabStop = true;
     }
 
     public event EventHandler<MapEditAppliedEventArgs>? EditApplied;
@@ -127,6 +135,7 @@ public sealed class MapViewport : ScrollableControl
         }
 
         DrawGrid(e.Graphics);
+        DrawMapStampSourceSelection(e.Graphics);
         DrawStampPreview(e.Graphics);
     }
 
@@ -137,6 +146,11 @@ public sealed class MapViewport : ScrollableControl
 
         activeMouseButton = e.Button;
         lastEditedCell = null;
+        if (TryBeginMapStampSelection(e.Location, e.Button))
+        {
+            return;
+        }
+
         UpdateStampPreview(e.Location, ResolveTool(e.Button));
         BeginStroke(ResolveTool(e.Button));
         ApplyToolAt(e.Location, e.Button, isDrag: false);
@@ -151,6 +165,12 @@ public sealed class MapViewport : ScrollableControl
             : ResolveTool(activeMouseButton);
         UpdateStampPreview(e.Location, previewTool);
 
+        if (mapStampSelectionActive)
+        {
+            UpdateMapStampSelection(e.Location);
+            return;
+        }
+
         if (activeMouseButton == MouseButtons.None || (e.Button & activeMouseButton) == 0)
         {
             return;
@@ -162,6 +182,15 @@ public sealed class MapViewport : ScrollableControl
     protected override void OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
+
+        if (mapStampSelectionActive && e.Button == activeMouseButton)
+        {
+            CommitMapStampSelection();
+            mapStampSelectionActive = false;
+            activeMouseButton = MouseButtons.None;
+            lastEditedCell = null;
+            return;
+        }
 
         if (e.Button == activeMouseButton)
         {
@@ -176,6 +205,21 @@ public sealed class MapViewport : ScrollableControl
         base.OnMouseLeave(e);
         InvalidateStampPreview();
         stampPreviewCell = null;
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+
+        if (e.KeyCode != Keys.Escape || mapStampCells.Count == 0)
+        {
+            return;
+        }
+
+        mapStampCells.Clear();
+        mapStampSize = new Size(1, 1);
+        mapStampSourceRange = null;
+        Invalidate();
     }
 
     protected override void OnMouseDoubleClick(MouseEventArgs e)
@@ -320,6 +364,12 @@ public sealed class MapViewport : ScrollableControl
             selectedTileId,
             TilePlacement.FormatAttributeValues(selectedTileSet.GetDefaultAttributes(selectedTileId)));
 
+        if (mapStampCells.Count > 0)
+        {
+            ApplyMapStamp(cell);
+            return;
+        }
+
         if (selectedTileSelection.Count > 1)
         {
             ApplyTileSelection(cell);
@@ -391,6 +441,50 @@ public sealed class MapViewport : ScrollableControl
 
         Invalidate(invalidation);
         EditApplied?.Invoke(this, new MapEditAppliedEventArgs(MapEditTool.Pen, selectedTileSet.Kind, cell, changes.Count));
+    }
+
+    private void ApplyMapStamp(Point cell)
+    {
+        if (document is null || mapStampLayerKind is not { } layerKind)
+        {
+            return;
+        }
+
+        var changes = new List<TileChange>();
+        var invalidation = Rectangle.Empty;
+        foreach (var stampCell in mapStampCells)
+        {
+            var x = cell.X + stampCell.OffsetX;
+            var y = cell.Y + stampCell.OffsetY;
+            if (!document.IsInside(x, y))
+            {
+                continue;
+            }
+
+            if (document.SetTileWithChange(layerKind, x, y, stampCell.Placement) is not { } change)
+            {
+                continue;
+            }
+
+            changes.Add(change);
+            var tileInvalidation = GetInvalidationRectangle(x, y);
+            invalidation = invalidation.IsEmpty ? tileInvalidation : Rectangle.Union(invalidation, tileInvalidation);
+        }
+
+        lastEditedCell = cell;
+        if (changes.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var change in changes)
+        {
+            pendingStrokeLayerKind = layerKind;
+            AddStrokeChange(change);
+        }
+
+        Invalidate(invalidation);
+        EditApplied?.Invoke(this, new MapEditAppliedEventArgs(MapEditTool.Pen, layerKind, cell, changes.Count));
     }
 
     private void ApplyEraser(Point cell)
@@ -542,8 +636,18 @@ public sealed class MapViewport : ScrollableControl
     private bool IsStampSnapActive(MapEditTool tool)
     {
         return tool == MapEditTool.Pen
-            && selectedTileSelection.Count > 1
+            && HasActiveStamp()
             && (ModifierKeys & Keys.Control) == Keys.Control;
+    }
+
+    private bool IsStampPreviewActive(MapEditTool tool)
+    {
+        return tool == MapEditTool.Pen;
+    }
+
+    private bool HasActiveStamp()
+    {
+        return mapStampCells.Count > 0 || selectedTileSelection.Count > 1;
     }
 
     private Point SnapCellToStamp(Point cell)
@@ -568,6 +672,11 @@ public sealed class MapViewport : ScrollableControl
 
     private Size GetStampSize()
     {
+        if (mapStampCells.Count > 0)
+        {
+            return mapStampSize;
+        }
+
         if (selectedTileSelection.Count == 0)
         {
             return new Size(1, 1);
@@ -630,6 +739,80 @@ public sealed class MapViewport : ScrollableControl
                 y0 += sy;
             }
         }
+    }
+
+    private bool TryBeginMapStampSelection(Point location, MouseButtons button)
+    {
+        if (document is null || selectedTileSet is null || button != MouseButtons.Left || (ModifierKeys & Keys.Shift) != Keys.Shift)
+        {
+            return false;
+        }
+
+        var cell = GetCellFromLocation(location);
+        if (!document.IsInside(cell.X, cell.Y))
+        {
+            return false;
+        }
+
+        mapStampSelectionActive = true;
+        mapStampSelectionStart = cell;
+        mapStampSelectionCurrent = cell;
+        mapStampLayerKind = selectedTileSet.Kind;
+        Invalidate(GetMapCellRangeInvalidationRectangle(mapStampSelectionStart, mapStampSelectionCurrent));
+        return true;
+    }
+
+    private void UpdateMapStampSelection(Point location)
+    {
+        if (document is null)
+        {
+            return;
+        }
+
+        var cell = GetCellFromLocation(location);
+        cell = new Point(
+            Math.Clamp(cell.X, 0, document.Width - 1),
+            Math.Clamp(cell.Y, 0, document.Height - 1));
+
+        if (cell == mapStampSelectionCurrent)
+        {
+            return;
+        }
+
+        var previousRectangle = GetMapCellRangeInvalidationRectangle(mapStampSelectionStart, mapStampSelectionCurrent);
+        mapStampSelectionCurrent = cell;
+        Invalidate(previousRectangle);
+        Invalidate(GetMapCellRangeInvalidationRectangle(mapStampSelectionStart, mapStampSelectionCurrent));
+    }
+
+    private void CommitMapStampSelection()
+    {
+        if (document is null || mapStampLayerKind is not { } layerKind)
+        {
+            return;
+        }
+
+        var range = GetCellRange(mapStampSelectionStart, mapStampSelectionCurrent);
+        mapStampCells.Clear();
+        mapStampSize = new Size(range.Width, range.Height);
+        mapStampSourceRange = range;
+
+        for (var y = range.Top; y < range.Bottom; y++)
+        {
+            for (var x = range.Left; x < range.Right; x++)
+            {
+                var placement = document.GetTile(layerKind, x, y);
+                if (placement.IsEmpty)
+                {
+                    continue;
+                }
+
+                mapStampCells.Add(new MapStampCell(x - range.Left, y - range.Top, placement));
+            }
+        }
+
+        Invalidate(GetMapCellRangeInvalidationRectangle(mapStampSelectionStart, mapStampSelectionCurrent));
+        InvalidateStampPreview();
     }
 
     private IEnumerable<Point> EnumerateStampLine(Point start, Point end)
@@ -777,7 +960,7 @@ public sealed class MapViewport : ScrollableControl
 
     private void DrawStampPreview(Graphics graphics)
     {
-        if (document is null || stampPreviewCell is not { } cell || !IsStampSnapActive(EditTool))
+        if (document is null || stampPreviewCell is not { } cell || !IsStampPreviewActive(EditTool))
         {
             return;
         }
@@ -790,6 +973,39 @@ public sealed class MapViewport : ScrollableControl
             stampSize.Height * document.TileSize);
 
         using var brush = new SolidBrush(Color.FromArgb(28, 255, 224, 64));
+        using var pen = new Pen(Color.FromArgb(255, 255, 224, 64), 2f);
+        graphics.FillRectangle(brush, rectangle);
+        graphics.DrawRectangle(pen, rectangle.X, rectangle.Y, rectangle.Width - 1, rectangle.Height - 1);
+    }
+
+    private void DrawMapStampSourceSelection(Graphics graphics)
+    {
+        if (document is null)
+        {
+            return;
+        }
+
+        Rectangle range;
+        if (mapStampSelectionActive)
+        {
+            range = GetCellRange(mapStampSelectionStart, mapStampSelectionCurrent);
+        }
+        else if (mapStampSourceRange is { } sourceRange)
+        {
+            range = sourceRange;
+        }
+        else
+        {
+            return;
+        }
+
+        var rectangle = new Rectangle(
+            range.X * document.TileSize,
+            range.Y * document.TileSize,
+            range.Width * document.TileSize,
+            range.Height * document.TileSize);
+
+        using var brush = new SolidBrush(Color.FromArgb(20, 255, 224, 64));
         using var pen = new Pen(Color.FromArgb(255, 255, 224, 64), 2f);
         graphics.FillRectangle(brush, rectangle);
         graphics.DrawRectangle(pen, rectangle.X, rectangle.Y, rectangle.Width - 1, rectangle.Height - 1);
@@ -809,16 +1025,47 @@ public sealed class MapViewport : ScrollableControl
             document.TileSize + 1);
     }
 
+    private Rectangle GetMapCellRangeInvalidationRectangle(Point start, Point end)
+    {
+        if (document is null)
+        {
+            return ClientRectangle;
+        }
+
+        var range = GetCellRange(start, end);
+        var rectangle = new Rectangle(
+            range.X * document.TileSize + AutoScrollPosition.X,
+            range.Y * document.TileSize + AutoScrollPosition.Y,
+            range.Width * document.TileSize + 1,
+            range.Height * document.TileSize + 1);
+        rectangle.Inflate(3, 3);
+        return rectangle;
+    }
+
+    private static Rectangle GetCellRange(Point start, Point end)
+    {
+        var left = Math.Min(start.X, end.X);
+        var top = Math.Min(start.Y, end.Y);
+        var right = Math.Max(start.X, end.X);
+        var bottom = Math.Max(start.Y, end.Y);
+        return Rectangle.FromLTRB(left, top, right + 1, bottom + 1);
+    }
+
     private void UpdateStampPreview(Point location, MapEditTool tool)
     {
-        if (document is null || !IsStampSnapActive(tool))
+        if (document is null || !IsStampPreviewActive(tool))
         {
             InvalidateStampPreview();
             stampPreviewCell = null;
             return;
         }
 
-        var cell = SnapCellToStamp(GetCellFromLocation(location));
+        var cell = GetCellFromLocation(location);
+        if (IsStampSnapActive(tool))
+        {
+            cell = SnapCellToStamp(cell);
+        }
+
         if (!document.IsInside(cell.X, cell.Y))
         {
             InvalidateStampPreview();
