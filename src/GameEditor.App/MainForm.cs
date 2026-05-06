@@ -1265,8 +1265,6 @@ public sealed class MainForm : Form
         {
             return;
         }
-
-        ApplyEditedAttributeLists(dialog.AttributeLists, saveImmediately: false);
     }
 
     private bool ApplyEditedAttributeLists(IReadOnlyList<AttributeListDefinition> source, bool saveImmediately)

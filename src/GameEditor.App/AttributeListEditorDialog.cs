@@ -132,11 +132,19 @@ public sealed class AttributeListEditorDialog : Form
         var okButton = new Button
         {
             Text = "OK",
-            DialogResult = DialogResult.OK,
             Dock = DockStyle.Right,
             Width = 90
         };
-        okButton.Click += (_, _) => EnsureDefaultAttributes();
+        okButton.Click += (_, _) =>
+        {
+            if (!SaveFromDialog())
+            {
+                return;
+            }
+
+            DialogResult = DialogResult.OK;
+            Close();
+        };
         saveButton.Text = "保存";
         saveButton.Dock = DockStyle.Left;
         saveButton.Width = 90;
@@ -353,6 +361,10 @@ public sealed class AttributeListEditorDialog : Form
         }
 
         EnsureDefaultAttributes();
+        if (!isDirty)
+        {
+            return true;
+        }
 
         if (saveHandler is null)
         {
@@ -379,11 +391,6 @@ public sealed class AttributeListEditorDialog : Form
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
-        if (DialogResult == DialogResult.OK)
-        {
-            EnsureDefaultAttributes();
-        }
-
         if (!isDirty)
         {
             base.OnFormClosing(e);
