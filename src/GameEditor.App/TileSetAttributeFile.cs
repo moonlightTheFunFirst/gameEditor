@@ -7,5 +7,7 @@ public sealed class TileSetAttributeFile
     public List<MapFileAttributeList> AttributeLists { get; set; } = [];
 
     public Dictionary<int, List<int>> TileAttributes { get; set; } = [];
+
+    public Dictionary<int, int> TilePriorities { get; set; } = [];
 }
 

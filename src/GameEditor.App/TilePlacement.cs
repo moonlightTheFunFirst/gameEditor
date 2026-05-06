@@ -1,6 +1,6 @@
 namespace GameEditor;
 
-public readonly record struct TilePlacement(int TileSetIndex, int TileId, string AttributeValuesCsv = "")
+public readonly record struct TilePlacement(int TileSetIndex, int TileId, string AttributeValuesCsv = "", int DisplayPriority = 0)
 {
     public static TilePlacement Empty { get; } = new(-1, -1);
 
@@ -11,6 +11,11 @@ public readonly record struct TilePlacement(int TileSetIndex, int TileId, string
     public TilePlacement WithAttributes(IEnumerable<int> attributeValues)
     {
         return this with { AttributeValuesCsv = FormatAttributeValues(attributeValues) };
+    }
+
+    public TilePlacement WithDisplayPriority(int displayPriority)
+    {
+        return this with { DisplayPriority = displayPriority };
     }
 
     public static string FormatAttributeValues(IEnumerable<int> attributeValues)

@@ -137,6 +137,30 @@ public sealed class MapDocument
         return new AttributeChange(x, y, before, after);
     }
 
+    public AttributeChange? SetDisplayPriorityWithChange(TileSetKind kind, int x, int y, int displayPriority)
+    {
+        if (!IsInside(x, y))
+        {
+            return null;
+        }
+
+        var layer = GetLayer(kind);
+        var before = layer[x, y];
+        if (before.IsEmpty)
+        {
+            return null;
+        }
+
+        var after = before.WithDisplayPriority(displayPriority);
+        if (before == after)
+        {
+            return null;
+        }
+
+        layer[x, y] = after;
+        return new AttributeChange(x, y, before, after);
+    }
+
     public bool ContainsAttributeValue(TileSetKind kind, int attributeValue)
     {
         return EnumerateTiles(kind)

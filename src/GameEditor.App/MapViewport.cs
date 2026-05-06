@@ -27,6 +27,7 @@ public sealed class MapViewport : ScrollableControl
     private Point mapStampSelectionCurrent;
     private TileSetKind? mapStampLayerKind;
     private TileSetKind selectedAttributeLayerKind = TileSetKind.Base;
+    private int selectedDisplayPriority;
     private float zoomScale = 1.0f;
     private bool showGrid = true;
 
@@ -128,6 +129,18 @@ public sealed class MapViewport : ScrollableControl
 
     [System.ComponentModel.Browsable(false)]
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public bool PriorityMode { get; set; }
+
+    [System.ComponentModel.Browsable(false)]
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public int SelectedDisplayPriority
+    {
+        get => selectedDisplayPriority;
+        set => selectedDisplayPriority = value;
+    }
+
+    [System.ComponentModel.Browsable(false)]
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public float ZoomScale
     {
         get => zoomScale;
@@ -189,6 +202,10 @@ public sealed class MapViewport : ScrollableControl
         if (AttributeMode)
         {
             DrawAttributeOverlay(e.Graphics);
+        }
+        else if (PriorityMode)
+        {
+            DrawPriorityOverlay(e.Graphics);
         }
 
         DrawGrid(e.Graphics);
@@ -300,7 +317,7 @@ public sealed class MapViewport : ScrollableControl
     {
         base.OnMouseDoubleClick(e);
 
-        if (!AttributeMode || document is null || e.Button != MouseButtons.Left)
+        if ((!AttributeMode && !PriorityMode) || document is null || e.Button != MouseButtons.Left)
         {
             return;
         }
@@ -318,14 +335,36 @@ public sealed class MapViewport : ScrollableControl
             return;
         }
 
-        using var dialog = new AttributeSetEditorDialog(document.ActiveAttributeList, current.AttributeValues);
-        if (dialog.ShowDialog(this) != DialogResult.OK)
+        if (AttributeMode)
+        {
+            using var dialog = new AttributeSetEditorDialog(document.ActiveAttributeList, current.AttributeValues);
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+            {
+                return;
+            }
+
+            var attributeChange = document.SetAttributesWithChange(layerKind, cell.X, cell.Y, dialog.SelectedValues);
+            if (attributeChange is null)
+            {
+                return;
+            }
+
+            Invalidate(GetInvalidationRectangle(cell.X, cell.Y));
+            EditCommandCommitted?.Invoke(
+                this,
+                new AttributeEditCommand(GetCommandName(MapEditTool.Attribute), layerKind, [attributeChange.Value]));
+            EditApplied?.Invoke(this, new MapEditAppliedEventArgs(MapEditTool.Attribute, layerKind, cell, 1));
+            return;
+        }
+
+        using var priorityDialog = new PriorityEditorDialog(current.DisplayPriority);
+        if (priorityDialog.ShowDialog(this) != DialogResult.OK)
         {
             return;
         }
 
-        var change = document.SetAttributesWithChange(layerKind, cell.X, cell.Y, dialog.SelectedValues);
-        if (change is null)
+        var priorityChange = document.SetDisplayPriorityWithChange(layerKind, cell.X, cell.Y, priorityDialog.Priority);
+        if (priorityChange is null)
         {
             return;
         }
@@ -333,8 +372,8 @@ public sealed class MapViewport : ScrollableControl
         Invalidate(GetInvalidationRectangle(cell.X, cell.Y));
         EditCommandCommitted?.Invoke(
             this,
-            new AttributeEditCommand(GetCommandName(MapEditTool.Attribute), layerKind, [change.Value]));
-        EditApplied?.Invoke(this, new MapEditAppliedEventArgs(MapEditTool.Attribute, layerKind, cell, 1));
+            new AttributeEditCommand(GetCommandName(MapEditTool.Priority), layerKind, [priorityChange.Value]));
+        EditApplied?.Invoke(this, new MapEditAppliedEventArgs(MapEditTool.Priority, layerKind, cell, 1));
     }
 
     private void ApplyToolAt(Point location, MouseButtons button, bool isDrag)
@@ -352,7 +391,11 @@ public sealed class MapViewport : ScrollableControl
             return;
         }
 
-        if (isDrag && tool != MapEditTool.Pen && tool != MapEditTool.Eraser && tool != MapEditTool.Attribute)
+        if (isDrag
+            && tool != MapEditTool.Pen
+            && tool != MapEditTool.Eraser
+            && tool != MapEditTool.Attribute
+            && tool != MapEditTool.Priority)
         {
             return;
         }
@@ -379,6 +422,13 @@ public sealed class MapViewport : ScrollableControl
                         ApplyAttribute(lineCell);
                     }
                 }
+                else if (tool == MapEditTool.Priority)
+                {
+                    if (PriorityMode)
+                    {
+                        ApplyDisplayPriority(lineCell);
+                    }
+                }
             }
 
             return;
@@ -403,6 +453,13 @@ public sealed class MapViewport : ScrollableControl
                 if (AttributeMode)
                 {
                     ApplyAttribute(cell);
+                }
+
+                break;
+            case MapEditTool.Priority:
+                if (PriorityMode)
+                {
+                    ApplyDisplayPriority(cell);
                 }
 
                 break;
@@ -437,7 +494,8 @@ public sealed class MapViewport : ScrollableControl
         var placement = new TilePlacement(
             selectedTileSet.Index,
             selectedTileId,
-            TilePlacement.FormatAttributeValues(selectedTileSet.GetDefaultAttributes(selectedTileId)));
+            TilePlacement.FormatAttributeValues(selectedTileSet.GetDefaultAttributes(selectedTileId)),
+            selectedTileSet.GetDefaultDisplayPriority(selectedTileId));
 
         if (mapStampCells.Count > 0)
         {
@@ -492,7 +550,8 @@ public sealed class MapViewport : ScrollableControl
             var placement = new TilePlacement(
                 selectedTileSet.Index,
                 selectionCell.TileId,
-                TilePlacement.FormatAttributeValues(selectedTileSet.GetDefaultAttributes(selectionCell.TileId)));
+                TilePlacement.FormatAttributeValues(selectedTileSet.GetDefaultAttributes(selectionCell.TileId)),
+                selectedTileSet.GetDefaultDisplayPriority(selectionCell.TileId));
             if (document.SetTileWithChange(selectedTileSet.Kind, x, y, placement) is not { } change)
             {
                 continue;
@@ -599,7 +658,8 @@ public sealed class MapViewport : ScrollableControl
         var placement = new TilePlacement(
             selectedTileSet.Index,
             selectedTileId,
-            TilePlacement.FormatAttributeValues(selectedTileSet.GetDefaultAttributes(selectedTileId)));
+            TilePlacement.FormatAttributeValues(selectedTileSet.GetDefaultAttributes(selectedTileId)),
+            selectedTileSet.GetDefaultDisplayPriority(selectedTileId));
         var changes = document.FloodFillWithChanges(selectedTileSet.Kind, cell.X, cell.Y, placement);
         if (changes.Count == 0)
         {
@@ -636,12 +696,33 @@ public sealed class MapViewport : ScrollableControl
         EditApplied?.Invoke(this, new MapEditAppliedEventArgs(MapEditTool.Attribute, layerKind, cell, 1));
     }
 
+    private void ApplyDisplayPriority(Point cell)
+    {
+        if (!PriorityMode || document is null)
+        {
+            return;
+        }
+
+        var layerKind = SelectedAttributeLayerKind;
+        var change = document.SetDisplayPriorityWithChange(layerKind, cell.X, cell.Y, SelectedDisplayPriority);
+        if (change is null)
+        {
+            lastEditedCell = cell;
+            return;
+        }
+
+        AddAttributeStrokeChange(change.Value);
+        lastEditedCell = cell;
+        Invalidate(GetInvalidationRectangle(cell.X, cell.Y));
+        EditApplied?.Invoke(this, new MapEditAppliedEventArgs(MapEditTool.Priority, layerKind, cell, 1));
+    }
+
     private void BeginStroke(MapEditTool tool)
     {
         pendingStrokeChanges.Clear();
         pendingAttributeChanges.Clear();
         pendingStrokeTool = tool;
-        pendingStrokeLayerKind = tool == MapEditTool.Attribute
+        pendingStrokeLayerKind = tool == MapEditTool.Attribute || tool == MapEditTool.Priority
             ? SelectedAttributeLayerKind
             : selectedTileSet?.Kind;
     }
@@ -722,7 +803,7 @@ public sealed class MapViewport : ScrollableControl
 
     private bool IsStampPreviewActive(MapEditTool tool)
     {
-        return tool == MapEditTool.Pen || tool == MapEditTool.Attribute;
+        return tool == MapEditTool.Pen || tool == MapEditTool.Attribute || tool == MapEditTool.Priority;
     }
 
     private bool HasActiveStamp()
@@ -848,6 +929,7 @@ public sealed class MapViewport : ScrollableControl
             MapEditTool.Fill => "塗りつぶし",
             MapEditTool.Eraser => "消しゴム",
             MapEditTool.Attribute => "Attribute",
+            MapEditTool.Priority => "表示優先度",
             _ => tool.ToString()
         };
     }
@@ -1053,6 +1135,48 @@ public sealed class MapViewport : ScrollableControl
         }
 
         DrawAttributeLabel(graphics, GetAttributeAbbreviation(attributeValues, list), destination);
+    }
+
+    private void DrawPriorityOverlay(Graphics graphics)
+    {
+        if (document is null)
+        {
+            return;
+        }
+
+        for (var y = 0; y < document.Height; y++)
+        {
+            for (var x = 0; x < document.Width; x++)
+            {
+                DrawPriorityCell(graphics, SelectedAttributeLayerKind, x, y);
+            }
+        }
+    }
+
+    private void DrawPriorityCell(Graphics graphics, TileSetKind kind, int x, int y)
+    {
+        if (document is null)
+        {
+            return;
+        }
+
+        var placement = document.GetTile(kind, x, y);
+        if (placement.IsEmpty)
+        {
+            return;
+        }
+
+        var destination = new Rectangle(
+            x * document.TileSize,
+            y * document.TileSize,
+            document.TileSize,
+            document.TileSize);
+        using (var dimBrush = new SolidBrush(Color.FromArgb(138, 0, 0, 0)))
+        {
+            graphics.FillRectangle(dimBrush, destination);
+        }
+
+        DrawAttributeLabel(graphics, placement.DisplayPriority.ToString(), destination);
     }
 
     private void DrawAttributeLabel(Graphics graphics, string label, Rectangle destination)
@@ -1270,7 +1394,7 @@ public sealed class MapViewport : ScrollableControl
 
     private Size GetStampPreviewSize(MapEditTool tool)
     {
-        return tool == MapEditTool.Attribute
+        return tool == MapEditTool.Attribute || tool == MapEditTool.Priority
             ? new Size(1, 1)
             : GetStampSize();
     }

@@ -94,7 +94,8 @@ public static class MapSerializer
             AttributeListId = tileSet.AttributeListId,
             TileAttributes = tileSet.TileAttributes.ToDictionary(
                 pair => pair.Key,
-                pair => TilePlacement.ParseAttributeValues(pair.Value).ToList())
+                pair => TilePlacement.ParseAttributeValues(pair.Value).ToList()),
+            TilePriorities = tileSet.TilePriorities.ToDictionary(pair => pair.Key, pair => pair.Value)
         };
     }
 
@@ -139,7 +140,8 @@ public static class MapSerializer
                 Y = y,
                 TileSetId = tileSet.Id,
                 TileId = placement.TileId,
-                AttributeValues = placement.AttributeValues.ToList()
+                AttributeValues = placement.AttributeValues.ToList(),
+                DisplayPriority = placement.DisplayPriority == 0 ? null : placement.DisplayPriority
             });
         }
 
@@ -196,7 +198,8 @@ public static class MapSerializer
                 tileSetFile.AttributeListId,
                 tileSetFile.TileAttributes.ToDictionary(
                     pair => pair.Key,
-                    pair => TilePlacement.FormatAttributeValues(pair.Value))));
+                    pair => TilePlacement.FormatAttributeValues(pair.Value)),
+                tileSetFile.TilePriorities.ToDictionary(pair => pair.Key, pair => pair.Value)));
         }
 
         return tileSets;
@@ -261,7 +264,8 @@ public static class MapSerializer
                 document.SetTile(layerKind, tile.X, tile.Y, new TilePlacement(
                     tileSet.Index,
                     tile.TileId,
-                    TilePlacement.FormatAttributeValues(attributes)));
+                    TilePlacement.FormatAttributeValues(attributes),
+                    tile.DisplayPriority ?? 0));
             }
         }
     }

@@ -13,7 +13,8 @@ public sealed class TileSet : IDisposable
         int tileSize,
         Color? transparentColor,
         string? attributeListId,
-        Dictionary<int, string> tileAttributes)
+        Dictionary<int, string> tileAttributes,
+        Dictionary<int, int> tilePriorities)
     {
         Index = index;
         Id = id;
@@ -26,6 +27,7 @@ public sealed class TileSet : IDisposable
         TransparentColor = transparentColor;
         AttributeListId = attributeListId;
         TileAttributes = tileAttributes;
+        TilePriorities = tilePriorities;
         Columns = image.Width / tileSize;
         Rows = image.Height / tileSize;
     }
@@ -52,6 +54,8 @@ public sealed class TileSet : IDisposable
 
     public Dictionary<int, string> TileAttributes { get; }
 
+    public Dictionary<int, int> TilePriorities { get; }
+
     public int Columns { get; }
 
     public int Rows { get; }
@@ -68,7 +72,8 @@ public sealed class TileSet : IDisposable
         int tileSize,
         Color? transparentColor = null,
         string? attributeListId = null,
-        Dictionary<int, string>? tileAttributes = null)
+        Dictionary<int, string>? tileAttributes = null,
+        Dictionary<int, int>? tilePriorities = null)
     {
         if (tileSize <= 0)
         {
@@ -95,7 +100,8 @@ public sealed class TileSet : IDisposable
             tileSize,
             transparentColor,
             attributeListId,
-            tileAttributes ?? []);
+            tileAttributes ?? [],
+            tilePriorities ?? []);
     }
 
     public IReadOnlyList<int> GetDefaultAttributes(int tileId)
@@ -120,6 +126,27 @@ public sealed class TileSet : IDisposable
         }
 
         TileAttributes[tileId] = csv;
+    }
+
+    public int GetDefaultDisplayPriority(int tileId)
+    {
+        return TilePriorities.TryGetValue(tileId, out var value) ? value : 0;
+    }
+
+    public void SetDefaultDisplayPriority(int tileId, int value)
+    {
+        if (tileId < 0 || tileId >= TileCount)
+        {
+            return;
+        }
+
+        if (value == 0)
+        {
+            TilePriorities.Remove(tileId);
+            return;
+        }
+
+        TilePriorities[tileId] = value;
     }
 
     public bool ContainsDefaultAttribute(int attributeValue)

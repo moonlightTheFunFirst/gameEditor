@@ -73,6 +73,8 @@ public sealed class MapFileTileSet
 
     public Dictionary<int, List<int>> TileAttributes { get; set; } = [];
 
+    public Dictionary<int, int> TilePriorities { get; set; } = [];
+
     public Dictionary<string, object?> Attributes { get; set; } = [];
 
     [JsonExtensionData]
@@ -114,6 +116,8 @@ public sealed class MapFileTile
     public int? Attribute { get; set; }
 
     public List<int> AttributeValues { get; set; } = [];
+
+    public int? DisplayPriority { get; set; }
 
     public Dictionary<string, object?> Attributes { get; set; } = [];
 

@@ -12,7 +12,8 @@ public sealed class TileSetDefinition
         string attributeFilePath,
         string? attributeListId,
         List<AttributeListDefinition> attributeLists,
-        Dictionary<int, string> tileAttributes)
+        Dictionary<int, string> tileAttributes,
+        Dictionary<int, int> tilePriorities)
     {
         Id = id;
         Name = name;
@@ -24,6 +25,7 @@ public sealed class TileSetDefinition
         AttributeListId = attributeListId;
         AttributeLists = attributeLists;
         TileAttributes = tileAttributes;
+        TilePriorities = tilePriorities;
     }
 
     public string Id { get; }
@@ -45,6 +47,8 @@ public sealed class TileSetDefinition
     public List<AttributeListDefinition> AttributeLists { get; }
 
     public Dictionary<int, string> TileAttributes { get; }
+
+    public Dictionary<int, int> TilePriorities { get; }
 
     public override string ToString()
     {

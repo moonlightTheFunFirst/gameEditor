@@ -53,7 +53,8 @@ public static class TileSetCatalog
                 attributes.AttributeLists.Select(ToAttributeListDefinition).ToList(),
                 attributes.TileAttributes.ToDictionary(
                     pair => pair.Key,
-                    pair => TilePlacement.FormatAttributeValues(pair.Value))));
+                    pair => TilePlacement.FormatAttributeValues(pair.Value)),
+                attributes.TilePriorities.ToDictionary(pair => pair.Key, pair => pair.Value)));
         }
 
         return definitions;
@@ -70,7 +71,8 @@ public static class TileSetCatalog
             AttributeLists = attributeLists.Select(ToMapFileAttributeList).ToList(),
             TileAttributes = tileSet.TileAttributes.ToDictionary(
                 pair => pair.Key,
-                pair => TilePlacement.ParseAttributeValues(pair.Value).ToList())
+                pair => TilePlacement.ParseAttributeValues(pair.Value).ToList()),
+            TilePriorities = tileSet.TilePriorities.ToDictionary(pair => pair.Key, pair => pair.Value)
         };
 
         var json = JsonSerializer.Serialize(file, JsonOptions);

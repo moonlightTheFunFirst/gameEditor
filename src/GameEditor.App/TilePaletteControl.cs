@@ -5,8 +5,10 @@ public sealed class TilePaletteControl : ScrollableControl
     private TileSet? tileSet;
     private int selectedTileId;
     private bool attributeMode;
+    private bool priorityMode;
     private AttributeListDefinition? attributeList;
     private IReadOnlyList<int> selectedAttributeValues = [];
+    private int selectedDisplayPriority;
     private Point selectionStartCell;
     private Point selectionEndCell;
     private bool rangeDragActive;
@@ -27,6 +29,8 @@ public sealed class TilePaletteControl : ScrollableControl
     public event EventHandler? SelectedTileChanged;
 
     public event EventHandler<TileAttributeChangedEventArgs>? TileAttributeChanged;
+
+    public event EventHandler<TilePriorityChangedEventArgs>? TilePriorityChanged;
 
     [System.ComponentModel.Browsable(false)]
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
@@ -81,6 +85,23 @@ public sealed class TilePaletteControl : ScrollableControl
 
     [System.ComponentModel.Browsable(false)]
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public bool PriorityMode
+    {
+        get => priorityMode;
+        set
+        {
+            if (priorityMode == value)
+            {
+                return;
+            }
+
+            priorityMode = value;
+            Invalidate();
+        }
+    }
+
+    [System.ComponentModel.Browsable(false)]
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public AttributeListDefinition? AttributeList
     {
         get => attributeList;
@@ -97,6 +118,14 @@ public sealed class TilePaletteControl : ScrollableControl
     {
         get => selectedAttributeValues;
         set => selectedAttributeValues = value.Distinct().Order().ToArray();
+    }
+
+    [System.ComponentModel.Browsable(false)]
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public int SelectedDisplayPriority
+    {
+        get => selectedDisplayPriority;
+        set => selectedDisplayPriority = value;
     }
 
     [System.ComponentModel.Browsable(false)]
@@ -126,6 +155,10 @@ public sealed class TilePaletteControl : ScrollableControl
             if (attributeMode)
             {
                 DrawAttributeTileOverlay(e.Graphics, tileId, destination);
+            }
+            else if (priorityMode)
+            {
+                DrawPriorityTileOverlay(e.Graphics, tileId, destination);
             }
         }
 
@@ -166,7 +199,7 @@ public sealed class TilePaletteControl : ScrollableControl
             return;
         }
 
-        if (!attributeMode)
+        if (!attributeMode && !priorityMode)
         {
             return;
         }
@@ -192,7 +225,7 @@ public sealed class TilePaletteControl : ScrollableControl
     {
         base.OnMouseDoubleClick(e);
 
-        if (!attributeMode || tileSet is null || e.Button != MouseButtons.Left)
+        if ((!attributeMode && !priorityMode) || tileSet is null || e.Button != MouseButtons.Left)
         {
             return;
         }
@@ -204,13 +237,25 @@ public sealed class TilePaletteControl : ScrollableControl
         }
 
         SelectedTileId = tileId;
-        using var dialog = new AttributeSetEditorDialog(attributeList, tileSet.GetDefaultAttributes(tileId));
-        if (dialog.ShowDialog(this) != DialogResult.OK)
+        if (attributeMode)
+        {
+            using var dialog = new AttributeSetEditorDialog(attributeList, tileSet.GetDefaultAttributes(tileId));
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+            {
+                return;
+            }
+
+            ApplyAttributeValues(tileId, dialog.SelectedValues);
+            return;
+        }
+
+        using var priorityDialog = new PriorityEditorDialog(tileSet.GetDefaultDisplayPriority(tileId));
+        if (priorityDialog.ShowDialog(this) != DialogResult.OK)
         {
             return;
         }
 
-        ApplyAttributeValues(tileId, dialog.SelectedValues);
+        ApplyDisplayPriority(tileId, priorityDialog.Priority);
     }
 
     private bool TryBeginRangeDrag(Point location, MouseButtons button)
@@ -220,7 +265,7 @@ public sealed class TilePaletteControl : ScrollableControl
             return false;
         }
 
-        if (button != MouseButtons.Left && (button != MouseButtons.Right || !attributeMode))
+        if (button != MouseButtons.Left && (button != MouseButtons.Right || (!attributeMode && !priorityMode)))
         {
             return false;
         }
@@ -270,19 +315,33 @@ public sealed class TilePaletteControl : ScrollableControl
             return;
         }
 
-        if (!attributeMode)
+        if (!attributeMode && !priorityMode)
         {
             SetSelectionRange(rangeDragStartCell, rangeDragCurrentCell);
             return;
         }
 
-        IReadOnlyList<int> values = rangeDragButton == MouseButtons.Right ? [] : selectedAttributeValues;
         var changedCount = 0;
-        foreach (var tileId in GetTileIdsInRange(rangeDragStartCell, rangeDragCurrentCell))
+        if (attributeMode)
         {
-            if (ApplyAttributeValues(tileId, values))
+            IReadOnlyList<int> values = rangeDragButton == MouseButtons.Right ? [] : selectedAttributeValues;
+            foreach (var tileId in GetTileIdsInRange(rangeDragStartCell, rangeDragCurrentCell))
             {
-                changedCount++;
+                if (ApplyAttributeValues(tileId, values))
+                {
+                    changedCount++;
+                }
+            }
+        }
+        else
+        {
+            var priority = rangeDragButton == MouseButtons.Right ? 0 : selectedDisplayPriority;
+            foreach (var tileId in GetTileIdsInRange(rangeDragStartCell, rangeDragCurrentCell))
+            {
+                if (ApplyDisplayPriority(tileId, priority))
+                {
+                    changedCount++;
+                }
             }
         }
 
@@ -301,7 +360,7 @@ public sealed class TilePaletteControl : ScrollableControl
         }
 
         SelectedTileId = tileId;
-        if (!attributeMode)
+        if (!attributeMode && !priorityMode)
         {
             SetSelectionToTile(tileId);
             return;
@@ -312,8 +371,15 @@ public sealed class TilePaletteControl : ScrollableControl
             return;
         }
 
-        IReadOnlyList<int> values = button == MouseButtons.Right ? [] : selectedAttributeValues;
-        ApplyAttributeValues(tileId, values);
+        if (attributeMode)
+        {
+            IReadOnlyList<int> values = button == MouseButtons.Right ? [] : selectedAttributeValues;
+            ApplyAttributeValues(tileId, values);
+            return;
+        }
+
+        var priority = button == MouseButtons.Right ? 0 : selectedDisplayPriority;
+        ApplyDisplayPriority(tileId, priority);
     }
 
     private bool ApplyAttributeValues(int tileId, IReadOnlyList<int> values)
@@ -332,6 +398,24 @@ public sealed class TilePaletteControl : ScrollableControl
         tileSet.SetDefaultAttributes(tileId, normalized);
         Invalidate(GetTileRectangle(tileId));
         TileAttributeChanged?.Invoke(this, new TileAttributeChangedEventArgs(tileSet, tileId, normalized));
+        return true;
+    }
+
+    private bool ApplyDisplayPriority(int tileId, int displayPriority)
+    {
+        if (tileSet is null)
+        {
+            return false;
+        }
+
+        if (tileSet.GetDefaultDisplayPriority(tileId) == displayPriority)
+        {
+            return false;
+        }
+
+        tileSet.SetDefaultDisplayPriority(tileId, displayPriority);
+        Invalidate(GetTileRectangle(tileId));
+        TilePriorityChanged?.Invoke(this, new TilePriorityChangedEventArgs(tileSet, tileId, displayPriority));
         return true;
     }
 
@@ -420,6 +504,21 @@ public sealed class TilePaletteControl : ScrollableControl
 
         var label = GetAttributeAbbreviation(attributeValues);
         DrawAttributeLabel(graphics, label, destination);
+    }
+
+    private void DrawPriorityTileOverlay(Graphics graphics, int tileId, Rectangle destination)
+    {
+        if (tileSet is null)
+        {
+            return;
+        }
+
+        using (var dimBrush = new SolidBrush(Color.FromArgb(138, 0, 0, 0)))
+        {
+            graphics.FillRectangle(dimBrush, destination);
+        }
+
+        DrawAttributeLabel(graphics, tileSet.GetDefaultDisplayPriority(tileId).ToString(), destination);
     }
 
     private void DrawAttributeLabel(Graphics graphics, string label, Rectangle destination)

@@ -34,8 +34,11 @@ public sealed class MainForm : Form
     private readonly ToolStripButton fillToolButton = new("塗りつぶし");
     private readonly ToolStripButton eraserToolButton = new("消しゴム");
     private readonly ToolStripButton attributeToolButton = new("属性");
+    private readonly ToolStripButton priorityToolButton = new("優先度");
     private readonly ToolStripButton basePaletteAttributeModeButton = new("パレット属性");
     private readonly ToolStripButton advancedPaletteAttributeModeButton = new("パレット属性");
+    private readonly ToolStripButton basePalettePriorityModeButton = new("パレット優先度");
+    private readonly ToolStripButton advancedPalettePriorityModeButton = new("パレット優先度");
     private readonly ToolStripLabel attributeListLabel = new("属性リスト:");
     private readonly ToolStripComboBox attributeListSelector = new();
     private readonly ToolStripLabel attributeLayerLabel = new("対象:");
@@ -43,8 +46,11 @@ public sealed class MainForm : Form
     private readonly ToolStripComboBox baseChipAttributeListSelector = new();
     private readonly ToolStripComboBox advancedChipAttributeListSelector = new();
     private readonly ToolStripButton attributeSetButton = new("属性選択...");
+    private readonly ToolStripButton displayPriorityButton = new("優先度: 0");
     private readonly ToolStripButton baseChipAttributeSetButton = new("属性: なし");
     private readonly ToolStripButton advancedChipAttributeSetButton = new("属性: なし");
+    private readonly ToolStripButton baseChipPriorityButton = new("優先度: 0");
+    private readonly ToolStripButton advancedChipPriorityButton = new("優先度: 0");
     private readonly ToolStripButton editAttributeListsButton = new("属性リスト");
     private readonly ToolStripButton undoButton = new("元に戻す");
     private readonly ToolStripButton redoButton = new("やり直し");
@@ -138,6 +144,8 @@ public sealed class MainForm : Form
         advancedPalette.SelectedTileChanged += (_, _) => UpdateSelectedTile();
         basePalette.TileAttributeChanged += PaletteTileAttributeChanged;
         advancedPalette.TileAttributeChanged += PaletteTileAttributeChanged;
+        basePalette.TilePriorityChanged += PaletteTilePriorityChanged;
+        advancedPalette.TilePriorityChanged += PaletteTilePriorityChanged;
         tileSetTabs.SelectedIndexChanged += (_, _) => UpdateActivePalette();
         mapTabs.SelectedIndexChanged += (_, _) =>
         {
@@ -353,6 +361,7 @@ public sealed class MainForm : Form
         mapToolStripItems.Add(ConfigureToolButton(fillToolButton, MapEditTool.Fill));
         mapToolStripItems.Add(ConfigureToolButton(eraserToolButton, MapEditTool.Eraser));
         mapToolStripItems.Add(ConfigureToolButton(attributeToolButton, MapEditTool.Attribute));
+        mapToolStripItems.Add(ConfigureToolButton(priorityToolButton, MapEditTool.Priority));
         mapToolStripItems.Add(new ToolStripSeparator());
         ConfigureAttributeListSelector(attributeListSelector, 150);
         attributeListSelector.SelectedIndexChanged += (_, _) => ChangeMapAttributeList(attributeListSelector);
@@ -362,8 +371,10 @@ public sealed class MainForm : Form
         mapToolStripItems.Add(attributeLayerLabel);
         mapToolStripItems.Add(attributeLayerSelector);
         attributeSetButton.Click += (_, _) => EditSelectedAttributeSet();
+        displayPriorityButton.Click += (_, _) => EditSelectedDisplayPriority();
         editAttributeListsButton.Click += (_, _) => EditAttributeLists();
         mapToolStripItems.Add(attributeSetButton);
+        mapToolStripItems.Add(displayPriorityButton);
         mapToolStripItems.Add(editAttributeListsButton);
 
         foreach (var item in mapToolStripItems)
@@ -756,13 +767,24 @@ public sealed class MainForm : Form
             : advancedPaletteAttributeModeButton;
         attributeModeButton.CheckOnClick = true;
         attributeModeButton.Click += (_, _) => SetPaletteAttributeMode(attributeModeButton.Checked);
+        var priorityModeButton = kind == TileSetKind.Base
+            ? basePalettePriorityModeButton
+            : advancedPalettePriorityModeButton;
+        priorityModeButton.CheckOnClick = true;
+        priorityModeButton.Click += (_, _) => SetPalettePriorityMode(priorityModeButton.Checked);
         var chipAttributeSetButton = kind == TileSetKind.Base
             ? baseChipAttributeSetButton
             : advancedChipAttributeSetButton;
         chipAttributeSetButton.Click += (_, _) => EditChipAttributeSet(kind);
+        var chipPriorityButton = kind == TileSetKind.Base
+            ? baseChipPriorityButton
+            : advancedChipPriorityButton;
+        chipPriorityButton.Click += (_, _) => EditChipDisplayPriority(kind);
 
         toolStrip.Items.Add(attributeModeButton);
         toolStrip.Items.Add(chipAttributeSetButton);
+        toolStrip.Items.Add(priorityModeButton);
+        toolStrip.Items.Add(chipPriorityButton);
         toolStrip.Items.Add(new ToolStripSeparator());
         toolStrip.Items.Add(new ToolStripButton("属性保存", null, (_, _) => SaveTileAttributes(kind)));
         panel.Controls.Add(toolStrip);
@@ -1177,6 +1199,8 @@ public sealed class MainForm : Form
         document.Viewport.EditTool = currentEditTool;
         document.Viewport.SecondaryEditTool = currentSecondaryEditTool;
         document.Viewport.AttributeMode = currentEditTool == MapEditTool.Attribute;
+        document.Viewport.PriorityMode = currentEditTool == MapEditTool.Priority;
+        document.Viewport.SelectedDisplayPriority = GetSelectedMapDisplayPriority(selectedMapAttributeLayerKind);
         document.Viewport.ShowGrid = gridMenuItem.Checked;
         document.Viewport.EditApplied += (_, args) =>
         {
@@ -1203,6 +1227,7 @@ public sealed class MainForm : Form
             activePalette = tileSetTabs.SelectedIndex == 1 ? advancedPalette : basePalette;
             Text = "gameEditor";
             RefreshAttributeListSelector(null);
+            RefreshAttributeValueSelector(null);
             UpdatePaletteAttributeContext(null);
             UpdateMapWorkspaceState();
             UpdateDocumentActionsState();
@@ -1257,9 +1282,11 @@ public sealed class MainForm : Form
         viewport.SelectedTileSelection = activePalette.SelectedTileSelection;
         viewport.SelectedAttributeLayerKind = selectedMapAttributeLayerKind;
         viewport.SelectedAttributeValues = GetSelectedAttributeValues();
+        viewport.SelectedDisplayPriority = GetSelectedMapDisplayPriority(selectedMapAttributeLayerKind);
         viewport.EditTool = currentEditTool;
         viewport.SecondaryEditTool = currentSecondaryEditTool;
         viewport.AttributeMode = currentEditTool == MapEditTool.Attribute;
+        viewport.PriorityMode = currentEditTool == MapEditTool.Priority;
     }
 
     private void UpdatePaletteAttributeContext(MapEditorDocument? document)
@@ -1268,9 +1295,14 @@ public sealed class MainForm : Form
         advancedPalette.AttributeList = GetTileSetAttributeList(TileSetKind.Advanced, document);
         basePalette.SelectedAttributeValues = GetSelectedChipAttributeValues(TileSetKind.Base);
         advancedPalette.SelectedAttributeValues = GetSelectedChipAttributeValues(TileSetKind.Advanced);
+        basePalette.SelectedDisplayPriority = GetSelectedChipDisplayPriority(TileSetKind.Base);
+        advancedPalette.SelectedDisplayPriority = GetSelectedChipDisplayPriority(TileSetKind.Advanced);
         var paletteAttributeMode = IsPaletteAttributeModeEnabled();
+        var palettePriorityMode = IsPalettePriorityModeEnabled();
         basePalette.AttributeMode = paletteAttributeMode;
         advancedPalette.AttributeMode = paletteAttributeMode;
+        basePalette.PriorityMode = palettePriorityMode;
+        advancedPalette.PriorityMode = palettePriorityMode;
     }
 
     private void RefreshAttributeListSelector(MapEditorDocument? document)
@@ -1355,6 +1387,12 @@ public sealed class MainForm : Form
     {
         basePaletteAttributeModeButton.Checked = enabled;
         advancedPaletteAttributeModeButton.Checked = enabled;
+        if (enabled)
+        {
+            basePalettePriorityModeButton.Checked = false;
+            advancedPalettePriorityModeButton.Checked = false;
+        }
+
         UpdatePaletteAttributeContext(CurrentDocument);
         RefreshProperties();
         statusLabel.Text = enabled ? "パレット属性モード" : "パレット通常モード";
@@ -1363,6 +1401,36 @@ public sealed class MainForm : Form
     private bool IsPaletteAttributeModeEnabled()
     {
         return basePaletteAttributeModeButton.Checked || advancedPaletteAttributeModeButton.Checked;
+    }
+
+    private void SetPalettePriorityMode(bool enabled)
+    {
+        basePalettePriorityModeButton.Checked = enabled;
+        advancedPalettePriorityModeButton.Checked = enabled;
+        if (enabled)
+        {
+            basePaletteAttributeModeButton.Checked = false;
+            advancedPaletteAttributeModeButton.Checked = false;
+        }
+
+        UpdatePaletteAttributeContext(CurrentDocument);
+        RefreshProperties();
+        statusLabel.Text = enabled ? "パレット優先度モード" : "パレット通常モード";
+    }
+
+    private bool IsPalettePriorityModeEnabled()
+    {
+        return basePalettePriorityModeButton.Checked || advancedPalettePriorityModeButton.Checked;
+    }
+
+    private string GetPaletteDisplayModeName()
+    {
+        if (IsPaletteAttributeModeEnabled())
+        {
+            return "属性";
+        }
+
+        return IsPalettePriorityModeEnabled() ? "優先度" : "通常";
     }
 
     private void SetMapGridVisible(bool visible)
@@ -1379,10 +1447,13 @@ public sealed class MainForm : Form
     private void RefreshAttributeValueSelector(MapEditorDocument? document)
     {
         attributeSetButton.Text = $"属性: {FormatAttributeSet(GetSelectedAttributeValues(), GetActiveAttributeList(document))}";
+        displayPriorityButton.Text = $"優先度: {GetSelectedMapDisplayPriority(selectedMapAttributeLayerKind)}";
         baseChipAttributeSetButton.Text =
             $"属性: {FormatAttributeSet(GetSelectedChipAttributeValues(TileSetKind.Base), GetTileSetAttributeList(TileSetKind.Base, document))}";
         advancedChipAttributeSetButton.Text =
             $"属性: {FormatAttributeSet(GetSelectedChipAttributeValues(TileSetKind.Advanced), GetTileSetAttributeList(TileSetKind.Advanced, document))}";
+        baseChipPriorityButton.Text = $"優先度: {GetSelectedChipDisplayPriority(TileSetKind.Base)}";
+        advancedChipPriorityButton.Text = $"優先度: {GetSelectedChipDisplayPriority(TileSetKind.Advanced)}";
     }
 
     private void ChangeMapAttributeList(ToolStripComboBox selector)
@@ -1522,6 +1593,10 @@ public sealed class MainForm : Form
     private IReadOnlyList<int> selectedAdvancedMapAttributeValues = [];
     private IReadOnlyList<int> selectedBaseChipAttributeValues = [];
     private IReadOnlyList<int> selectedAdvancedChipAttributeValues = [];
+    private int selectedBaseMapDisplayPriority;
+    private int selectedAdvancedMapDisplayPriority;
+    private int selectedBaseChipDisplayPriority;
+    private int selectedAdvancedChipDisplayPriority;
 
     private IReadOnlyList<int> GetSelectedAttributeValues()
     {
@@ -1576,6 +1651,42 @@ public sealed class MainForm : Form
         selectedAdvancedChipAttributeValues = [];
     }
 
+    private int GetSelectedMapDisplayPriority(TileSetKind kind)
+    {
+        return kind == TileSetKind.Base
+            ? selectedBaseMapDisplayPriority
+            : selectedAdvancedMapDisplayPriority;
+    }
+
+    private void SetSelectedMapDisplayPriority(TileSetKind kind, int value)
+    {
+        if (kind == TileSetKind.Base)
+        {
+            selectedBaseMapDisplayPriority = value;
+            return;
+        }
+
+        selectedAdvancedMapDisplayPriority = value;
+    }
+
+    private int GetSelectedChipDisplayPriority(TileSetKind kind)
+    {
+        return kind == TileSetKind.Base
+            ? selectedBaseChipDisplayPriority
+            : selectedAdvancedChipDisplayPriority;
+    }
+
+    private void SetSelectedChipDisplayPriority(TileSetKind kind, int value)
+    {
+        if (kind == TileSetKind.Base)
+        {
+            selectedBaseChipDisplayPriority = value;
+            return;
+        }
+
+        selectedAdvancedChipDisplayPriority = value;
+    }
+
     private void EditSelectedAttributeSet()
     {
         var document = CurrentDocument;
@@ -1591,6 +1702,21 @@ public sealed class MainForm : Form
         RefreshProperties();
     }
 
+    private void EditSelectedDisplayPriority()
+    {
+        var document = CurrentDocument;
+        using var dialog = new PriorityEditorDialog(GetSelectedMapDisplayPriority(selectedMapAttributeLayerKind));
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        SetSelectedMapDisplayPriority(selectedMapAttributeLayerKind, dialog.Priority);
+        RefreshAttributeValueSelector(document);
+        SyncCurrentViewportSelection();
+        RefreshProperties();
+    }
+
     private void EditChipAttributeSet(TileSetKind kind)
     {
         var document = CurrentDocument;
@@ -1601,6 +1727,21 @@ public sealed class MainForm : Form
         }
 
         SetSelectedChipAttributeValues(kind, dialog.SelectedValues);
+        RefreshAttributeValueSelector(document);
+        UpdatePaletteAttributeContext(document);
+        RefreshProperties();
+    }
+
+    private void EditChipDisplayPriority(TileSetKind kind)
+    {
+        var document = CurrentDocument;
+        using var dialog = new PriorityEditorDialog(GetSelectedChipDisplayPriority(kind));
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        SetSelectedChipDisplayPriority(kind, dialog.Priority);
         RefreshAttributeValueSelector(document);
         UpdatePaletteAttributeContext(document);
         RefreshProperties();
@@ -1630,6 +1771,22 @@ public sealed class MainForm : Form
         statusLabel.Text = args.AttributeValues.Count > 0
             ? $"タイル {args.TileId} の属性: {FormatAttributeSet(args.AttributeValues, GetTileSetAttributeList(args.TileSet.Kind, document))}"
             : $"タイル {args.TileId} の属性をクリアしました";
+    }
+
+    private void PaletteTilePriorityChanged(object? sender, TilePriorityChangedEventArgs args)
+    {
+        var document = CurrentDocument;
+        MarkTileAttributesDirty(args.TileSet.Kind);
+        if (document is not null)
+        {
+            document.IsDirty = true;
+            MarkProjectDirtyForDocument(document);
+            UpdateDocumentTabTitle(document);
+            document.Viewport.Invalidate();
+        }
+
+        RefreshProperties();
+        statusLabel.Text = $"タイル {args.TileId} の優先度: {args.DisplayPriority}";
     }
 
     private void EditAttributeLists()
@@ -1951,6 +2108,12 @@ public sealed class MainForm : Form
         foreach (var (tileId, value) in tileSet.TileAttributes)
         {
             definition.TileAttributes[tileId] = value;
+        }
+
+        definition.TilePriorities.Clear();
+        foreach (var (tileId, value) in tileSet.TilePriorities)
+        {
+            definition.TilePriorities[tileId] = value;
         }
     }
 
@@ -2299,7 +2462,8 @@ public sealed class MainForm : Form
             tileSize,
             definition.TransparentColor,
             definition.AttributeListId,
-            definition.TileAttributes.ToDictionary());
+            definition.TileAttributes.ToDictionary(),
+            definition.TilePriorities.ToDictionary());
     }
 
     private static int GetTileSetIndex(TileSetKind kind)
@@ -2860,6 +3024,8 @@ public sealed class MainForm : Form
         {
             document.Viewport.EditTool = currentEditTool;
             document.Viewport.AttributeMode = currentEditTool == MapEditTool.Attribute;
+            document.Viewport.PriorityMode = currentEditTool == MapEditTool.Priority;
+            document.Viewport.SelectedDisplayPriority = GetSelectedMapDisplayPriority(selectedMapAttributeLayerKind);
             document.Viewport.Invalidate();
         }
 
@@ -2874,6 +3040,7 @@ public sealed class MainForm : Form
         fillToolButton.Checked = currentEditTool == MapEditTool.Fill;
         eraserToolButton.Checked = currentEditTool == MapEditTool.Eraser;
         attributeToolButton.Checked = currentEditTool == MapEditTool.Attribute;
+        priorityToolButton.Checked = currentEditTool == MapEditTool.Priority;
     }
 
     private ToolStripButton ConfigureToolButton(ToolStripButton button, MapEditTool tool)
@@ -2919,15 +3086,21 @@ public sealed class MainForm : Form
         fillToolButton.Enabled = hasDocument;
         eraserToolButton.Enabled = hasDocument;
         attributeToolButton.Enabled = hasDocument;
+        priorityToolButton.Enabled = hasDocument;
         basePaletteAttributeModeButton.Enabled = hasBasePalette;
         advancedPaletteAttributeModeButton.Enabled = hasAdvancedPalette;
+        basePalettePriorityModeButton.Enabled = hasBasePalette;
+        advancedPalettePriorityModeButton.Enabled = hasAdvancedPalette;
         attributeListLabel.Enabled = activeEditorKind == ActiveEditorKind.Map;
         attributeListSelector.Enabled = activeEditorKind == ActiveEditorKind.Map && attributeListSelector.Items.Count > 0;
         baseChipAttributeListSelector.Enabled = activeEditorKind == ActiveEditorKind.Map && baseChipAttributeListSelector.Items.Count > 0;
         advancedChipAttributeListSelector.Enabled = activeEditorKind == ActiveEditorKind.Map && advancedChipAttributeListSelector.Items.Count > 0;
         attributeSetButton.Enabled = activeEditorKind == ActiveEditorKind.Map && hasDocument;
+        displayPriorityButton.Enabled = activeEditorKind == ActiveEditorKind.Map && hasDocument;
         baseChipAttributeSetButton.Enabled = hasBasePalette;
         advancedChipAttributeSetButton.Enabled = hasAdvancedPalette;
+        baseChipPriorityButton.Enabled = hasBasePalette;
+        advancedChipPriorityButton.Enabled = hasAdvancedPalette;
         editAttributeListsButton.Enabled = activeEditorKind == ActiveEditorKind.Map;
         attributeLayerLabel.Enabled = activeEditorKind == ActiveEditorKind.Map;
         attributeLayerSelector.Enabled = activeEditorKind == ActiveEditorKind.Map;
@@ -2963,7 +3136,8 @@ public sealed class MainForm : Form
         properties.Items.Add(new ListViewItem(new[] { "属性リスト", document.Map.ActiveAttributeList?.Name ?? "未設定" }));
         properties.Items.Add(new ListViewItem(new[] { "属性対象", GetKindName(selectedMapAttributeLayerKind) }));
         properties.Items.Add(new ListViewItem(new[] { "選択属性", FormatAttributeSet(GetSelectedAttributeValues(), document.Map.ActiveAttributeList) }));
-        properties.Items.Add(new ListViewItem(new[] { "パレット表示", IsPaletteAttributeModeEnabled() ? "属性" : "通常" }));
+        properties.Items.Add(new ListViewItem(new[] { "選択優先度", GetSelectedMapDisplayPriority(selectedMapAttributeLayerKind).ToString() }));
+        properties.Items.Add(new ListViewItem(new[] { "パレット表示", GetPaletteDisplayModeName() }));
 
         if (tileSet is not null)
         {
@@ -2975,6 +3149,13 @@ public sealed class MainForm : Form
                 "チップ既定属性",
                 selectedTileId >= 0
                     ? FormatAttributeSet(tileSet.GetDefaultAttributes(selectedTileId), GetTileSetAttributeList(tileSet.Kind, document))
+                    : "未設定"
+            }));
+            properties.Items.Add(new ListViewItem(new[]
+            {
+                "チップ既定優先度",
+                selectedTileId >= 0
+                    ? tileSet.GetDefaultDisplayPriority(selectedTileId).ToString()
                     : "未設定"
             }));
         }
@@ -3052,6 +3233,7 @@ public sealed class MainForm : Form
             MapEditTool.Fill => "塗りつぶし",
             MapEditTool.Eraser => "消しゴム",
             MapEditTool.Attribute => "属性",
+            MapEditTool.Priority => "優先度",
             _ => tool.ToString()
         };
     }
