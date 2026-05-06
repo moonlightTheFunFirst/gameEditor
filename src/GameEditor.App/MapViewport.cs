@@ -325,8 +325,6 @@ public sealed class MapViewport : ScrollableControl
                 }
 
                 break;
-            case MapEditTool.Select:
-                break;
             case MapEditTool.Attribute:
                 if (AttributeMode)
                 {
@@ -700,7 +698,6 @@ public sealed class MapViewport : ScrollableControl
             MapEditTool.Pen => "ペン",
             MapEditTool.Fill => "塗りつぶし",
             MapEditTool.Eraser => "消しゴム",
-            MapEditTool.Select => "選択",
             MapEditTool.Attribute => "Attribute",
             _ => tool.ToString()
         };

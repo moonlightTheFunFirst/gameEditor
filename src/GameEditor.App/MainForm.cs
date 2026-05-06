@@ -33,11 +33,9 @@ public sealed class MainForm : Form
     private readonly ToolStripButton penToolButton = new("ペン");
     private readonly ToolStripButton fillToolButton = new("塗りつぶし");
     private readonly ToolStripButton eraserToolButton = new("消しゴム");
-    private readonly ToolStripButton selectToolButton = new("選択");
     private readonly ToolStripButton attributeToolButton = new("属性");
     private readonly ToolStripButton paletteAttributeModeButton = new("パレット属性");
     private readonly ToolStripButton attributeSetButton = new("属性選択...");
-    private readonly ToolStripButton setTileAttributeButton = new("チップ属性");
     private readonly ToolStripButton editAttributeListsButton = new("属性リスト");
     private readonly ToolStripButton undoButton = new("元に戻す");
     private readonly ToolStripButton redoButton = new("やり直し");
@@ -311,17 +309,14 @@ public sealed class MainForm : Form
         mapToolStripItems.Add(ConfigureToolButton(penToolButton, MapEditTool.Pen));
         mapToolStripItems.Add(ConfigureToolButton(fillToolButton, MapEditTool.Fill));
         mapToolStripItems.Add(ConfigureToolButton(eraserToolButton, MapEditTool.Eraser));
-        mapToolStripItems.Add(ConfigureToolButton(selectToolButton, MapEditTool.Select));
         mapToolStripItems.Add(ConfigureToolButton(attributeToolButton, MapEditTool.Attribute));
         mapToolStripItems.Add(new ToolStripSeparator());
         paletteAttributeModeButton.CheckOnClick = true;
         paletteAttributeModeButton.Click += (_, _) => SetPaletteAttributeMode(paletteAttributeModeButton.Checked);
         mapToolStripItems.Add(paletteAttributeModeButton);
         attributeSetButton.Click += (_, _) => EditSelectedAttributeSet();
-        setTileAttributeButton.Click += (_, _) => SetSelectedTileDefaultAttribute();
         editAttributeListsButton.Click += (_, _) => EditAttributeLists();
         mapToolStripItems.Add(attributeSetButton);
-        mapToolStripItems.Add(setTileAttributeButton);
         mapToolStripItems.Add(editAttributeListsButton);
 
         foreach (var item in mapToolStripItems)
@@ -1467,32 +1462,6 @@ public sealed class MainForm : Form
         return string.Equals(tileSetAttributeListId, attributeListId, StringComparison.Ordinal);
     }
 
-    private void SetSelectedTileDefaultAttribute()
-    {
-        var document = CurrentDocument;
-        if (activePalette?.TileSet is not { } tileSet || activePalette.SelectedTileId < 0)
-        {
-            return;
-        }
-
-        tileSet.AttributeListId = document?.Map.ActiveAttributeListId ?? editorActiveAttributeListId;
-        tileSet.SetDefaultAttributes(activePalette.SelectedTileId, GetSelectedAttributeValues());
-        MarkTileAttributesDirty(tileSet.Kind);
-        activePalette.Invalidate();
-        if (document is null)
-        {
-            RefreshProperties();
-            statusLabel.Text = $"タイル {activePalette.SelectedTileId} の属性を設定しました";
-            return;
-        }
-
-        document.IsDirty = true;
-        MarkProjectDirtyForDocument(document);
-        UpdateDocumentTabTitle(document);
-        RefreshProperties();
-        statusLabel.Text = $"タイル {activePalette.SelectedTileId} の属性を設定しました";
-    }
-
     private void MarkTileAttributesDirty(TileSetKind kind)
     {
         dirtyTileAttributeKinds.Add(kind);
@@ -2456,7 +2425,6 @@ public sealed class MainForm : Form
         penToolButton.Checked = currentEditTool == MapEditTool.Pen;
         fillToolButton.Checked = currentEditTool == MapEditTool.Fill;
         eraserToolButton.Checked = currentEditTool == MapEditTool.Eraser;
-        selectToolButton.Checked = currentEditTool == MapEditTool.Select;
         attributeToolButton.Checked = currentEditTool == MapEditTool.Attribute;
     }
 
@@ -2492,11 +2460,9 @@ public sealed class MainForm : Form
         penToolButton.Enabled = hasDocument;
         fillToolButton.Enabled = hasDocument;
         eraserToolButton.Enabled = hasDocument;
-        selectToolButton.Enabled = hasDocument;
         attributeToolButton.Enabled = hasDocument;
         paletteAttributeModeButton.Enabled = hasPalette;
         attributeSetButton.Enabled = hasPalette;
-        setTileAttributeButton.Enabled = hasPalette;
         editAttributeListsButton.Enabled = activeEditorKind == ActiveEditorKind.Map;
         RefreshProperties();
     }
@@ -2611,7 +2577,6 @@ public sealed class MainForm : Form
             MapEditTool.Pen => "ペン",
             MapEditTool.Fill => "塗りつぶし",
             MapEditTool.Eraser => "消しゴム",
-            MapEditTool.Select => "選択",
             MapEditTool.Attribute => "属性",
             _ => tool.ToString()
         };
