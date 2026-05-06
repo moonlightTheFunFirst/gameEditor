@@ -2,6 +2,10 @@ namespace GameEditor;
 
 public sealed class MapViewport : ScrollableControl
 {
+    private const float MinZoomScale = 0.25f;
+    private const float MaxZoomScale = 1.0f;
+    private static readonly float[] ZoomSteps = [0.25f, 0.5f, 0.75f, 1.0f];
+
     private MapDocument? document;
     private IReadOnlyList<TileSet> tileSets = Array.Empty<TileSet>();
     private TileSet? selectedTileSet;
@@ -22,6 +26,8 @@ public sealed class MapViewport : ScrollableControl
     private Point mapStampSelectionStart;
     private Point mapStampSelectionCurrent;
     private TileSetKind? mapStampLayerKind;
+    private float zoomScale = 1.0f;
+    private bool showGrid = true;
 
     public MapViewport()
     {
@@ -104,6 +110,31 @@ public sealed class MapViewport : ScrollableControl
 
     [System.ComponentModel.Browsable(false)]
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public float ZoomScale
+    {
+        get => zoomScale;
+        set => SetZoomScale(value);
+    }
+
+    [System.ComponentModel.Browsable(false)]
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public bool ShowGrid
+    {
+        get => showGrid;
+        set
+        {
+            if (showGrid == value)
+            {
+                return;
+            }
+
+            showGrid = value;
+            Invalidate();
+        }
+    }
+
+    [System.ComponentModel.Browsable(false)]
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public IReadOnlyList<TileSelectionCell> SelectedTileSelection
     {
         get => selectedTileSelection;
@@ -128,7 +159,14 @@ public sealed class MapViewport : ScrollableControl
             return;
         }
 
-        e.Graphics.TranslateTransform(AutoScrollPosition.X, AutoScrollPosition.Y);
+        using var transform = new System.Drawing.Drawing2D.Matrix(
+            zoomScale,
+            0,
+            0,
+            zoomScale,
+            AutoScrollPosition.X,
+            AutoScrollPosition.Y);
+        e.Graphics.Transform = transform;
         DrawPlacedTiles(e.Graphics);
         if (AttributeMode)
         {
@@ -199,6 +237,23 @@ public sealed class MapViewport : ScrollableControl
             activeMouseButton = MouseButtons.None;
             lastEditedCell = null;
         }
+    }
+
+    protected override void OnMouseEnter(EventArgs e)
+    {
+        base.OnMouseEnter(e);
+        Focus();
+    }
+
+    protected override void OnMouseWheel(MouseEventArgs e)
+    {
+        if ((ModifierKeys & Keys.Shift) == Keys.Shift)
+        {
+            SetZoomScale(GetWheelZoomScale(e.Delta), e.Location);
+            return;
+        }
+
+        base.OnMouseWheel(e);
     }
 
     protected override void OnMouseLeave(EventArgs e)
@@ -337,7 +392,9 @@ public sealed class MapViewport : ScrollableControl
 
     private void UpdateScrollSize()
     {
-        AutoScrollMinSize = document?.PixelSize ?? Size.Empty;
+        AutoScrollMinSize = document is null
+            ? Size.Empty
+            : ScaleSize(document.PixelSize);
     }
 
     private void DrawPlacedTiles(Graphics graphics)
@@ -623,7 +680,9 @@ public sealed class MapViewport : ScrollableControl
 
         var mapX = location.X - AutoScrollPosition.X;
         var mapY = location.Y - AutoScrollPosition.Y;
-        return new Point(mapX / document.TileSize, mapY / document.TileSize);
+        return new Point(
+            (int)Math.Floor(mapX / zoomScale / document.TileSize),
+            (int)Math.Floor(mapY / zoomScale / document.TileSize));
     }
 
     private Point GetEffectiveCellFromLocation(Point location, MapEditTool tool)
@@ -667,6 +726,74 @@ public sealed class MapViewport : ScrollableControl
         return value < 0
             ? ((value - step + 1) / step) * step
             : (value / step) * step;
+    }
+
+    private void SetZoomScale(float value, Point? anchorClientPoint = null)
+    {
+        var nextScale = Math.Clamp(value, MinZoomScale, MaxZoomScale);
+        if (Math.Abs(zoomScale - nextScale) < 0.001f)
+        {
+            return;
+        }
+
+        var anchor = anchorClientPoint ?? new Point(ClientSize.Width / 2, ClientSize.Height / 2);
+        var anchorMapPoint = GetMapPointFromLocation(anchor);
+        zoomScale = nextScale;
+        UpdateScrollSize();
+        ScrollToKeepMapPointAt(anchorMapPoint, anchor);
+        Invalidate();
+    }
+
+    private float GetWheelZoomScale(int delta)
+    {
+        if (delta < 0)
+        {
+            for (var i = ZoomSteps.Length - 1; i >= 0; i--)
+            {
+                if (ZoomSteps[i] < zoomScale - 0.001f)
+                {
+                    return ZoomSteps[i];
+                }
+            }
+
+            return MinZoomScale;
+        }
+
+        if (delta > 0)
+        {
+            foreach (var step in ZoomSteps)
+            {
+                if (step > zoomScale + 0.001f)
+                {
+                    return step;
+                }
+            }
+        }
+
+        return MaxZoomScale;
+    }
+
+    private PointF GetMapPointFromLocation(Point location)
+    {
+        return new PointF(
+            (location.X - AutoScrollPosition.X) / zoomScale,
+            (location.Y - AutoScrollPosition.Y) / zoomScale);
+    }
+
+    private void ScrollToKeepMapPointAt(PointF mapPoint, Point clientPoint)
+    {
+        var maxX = Math.Max(0, AutoScrollMinSize.Width - ClientSize.Width);
+        var maxY = Math.Max(0, AutoScrollMinSize.Height - ClientSize.Height);
+        var scrollX = Math.Clamp((int)Math.Round((mapPoint.X * zoomScale) - clientPoint.X), 0, maxX);
+        var scrollY = Math.Clamp((int)Math.Round((mapPoint.Y * zoomScale) - clientPoint.Y), 0, maxY);
+        AutoScrollPosition = new Point(scrollX, scrollY);
+    }
+
+    private Size ScaleSize(Size size)
+    {
+        return new Size(
+            Math.Max(1, (int)Math.Ceiling(size.Width * zoomScale)),
+            Math.Max(1, (int)Math.Ceiling(size.Height * zoomScale)));
     }
 
     private Size GetStampSize()
@@ -937,7 +1064,7 @@ public sealed class MapViewport : ScrollableControl
 
     private void DrawGrid(Graphics graphics)
     {
-        if (document is null)
+        if (document is null || !showGrid)
         {
             return;
         }
@@ -1016,11 +1143,11 @@ public sealed class MapViewport : ScrollableControl
             return ClientRectangle;
         }
 
-        return new Rectangle(
-            tileX * document.TileSize + AutoScrollPosition.X,
-            tileY * document.TileSize + AutoScrollPosition.Y,
-            document.TileSize + 1,
-            document.TileSize + 1);
+        return GetLogicalInvalidationRectangle(
+            tileX * document.TileSize,
+            tileY * document.TileSize,
+            document.TileSize,
+            document.TileSize);
     }
 
     private Rectangle GetMapCellRangeInvalidationRectangle(Point start, Point end)
@@ -1031,11 +1158,11 @@ public sealed class MapViewport : ScrollableControl
         }
 
         var range = GetCellRange(start, end);
-        var rectangle = new Rectangle(
-            range.X * document.TileSize + AutoScrollPosition.X,
-            range.Y * document.TileSize + AutoScrollPosition.Y,
-            range.Width * document.TileSize + 1,
-            range.Height * document.TileSize + 1);
+        var rectangle = GetLogicalInvalidationRectangle(
+            range.X * document.TileSize,
+            range.Y * document.TileSize,
+            range.Width * document.TileSize,
+            range.Height * document.TileSize);
         rectangle.Inflate(3, 3);
         return rectangle;
     }
@@ -1102,13 +1229,22 @@ public sealed class MapViewport : ScrollableControl
             return ClientRectangle;
         }
 
-        var rectangle = new Rectangle(
-            cell.X * document.TileSize + AutoScrollPosition.X,
-            cell.Y * document.TileSize + AutoScrollPosition.Y,
-            stampPreviewSize.Width * document.TileSize + 1,
-            stampPreviewSize.Height * document.TileSize + 1);
+        var rectangle = GetLogicalInvalidationRectangle(
+            cell.X * document.TileSize,
+            cell.Y * document.TileSize,
+            stampPreviewSize.Width * document.TileSize,
+            stampPreviewSize.Height * document.TileSize);
         rectangle.Inflate(3, 3);
         return rectangle;
+    }
+
+    private Rectangle GetLogicalInvalidationRectangle(int x, int y, int width, int height)
+    {
+        var scaledX = (int)Math.Floor((x * zoomScale) + AutoScrollPosition.X);
+        var scaledY = (int)Math.Floor((y * zoomScale) + AutoScrollPosition.Y);
+        var scaledWidth = Math.Max(1, (int)Math.Ceiling(width * zoomScale)) + 1;
+        var scaledHeight = Math.Max(1, (int)Math.Ceiling(height * zoomScale)) + 1;
+        return new Rectangle(scaledX, scaledY, scaledWidth, scaledHeight);
     }
 
     private Size GetStampPreviewSize(MapEditTool tool)

@@ -45,6 +45,7 @@ public sealed class MainForm : Form
     private readonly ToolStripMenuItem redoMenuItem = new("やり直し");
     private readonly ToolStripMenuItem saveMapEditMenuItem = new("上書き保存");
     private readonly ToolStripMenuItem saveMapAsEditMenuItem = new("名前を付けて保存");
+    private readonly ToolStripMenuItem gridMenuItem = new("グリッド");
     private readonly ToolStripMenuItem closeMapMenuItem = new("閉じる");
     private readonly ToolStripMenuItem mapMenu = new("マップ");
     private readonly ToolStripMenuItem animationMenu = new("アニメ");
@@ -243,8 +244,10 @@ public sealed class MainForm : Form
         ConfigureEditorSpecificMenus();
 
         var viewMenu = new ToolStripMenuItem("表示");
-        viewMenu.DropDownItems.Add("グリッド");
-        viewMenu.DropDownItems.Add("ズームリセット");
+        gridMenuItem.CheckOnClick = true;
+        gridMenuItem.Checked = true;
+        gridMenuItem.Click += (_, _) => SetMapGridVisible(gridMenuItem.Checked);
+        viewMenu.DropDownItems.Add(gridMenuItem);
 
         menu.Items.Add(fileMenu);
         menu.Items.Add(editMenu);
@@ -1109,6 +1112,7 @@ public sealed class MainForm : Form
         document.Viewport.EditTool = currentEditTool;
         document.Viewport.SecondaryEditTool = currentSecondaryEditTool;
         document.Viewport.AttributeMode = currentEditTool == MapEditTool.Attribute;
+        document.Viewport.ShowGrid = gridMenuItem.Checked;
         document.Viewport.EditApplied += (_, args) =>
         {
             var layer = args.LayerKind is null ? "" : $" / {GetKindName(args.LayerKind.Value)}";
@@ -1250,6 +1254,17 @@ public sealed class MainForm : Form
         UpdatePaletteAttributeContext(CurrentDocument);
         RefreshProperties();
         statusLabel.Text = enabled ? "パレット属性モード" : "パレット通常モード";
+    }
+
+    private void SetMapGridVisible(bool visible)
+    {
+        gridMenuItem.Checked = visible;
+        foreach (var document in EnumerateDocuments())
+        {
+            document.Viewport.ShowGrid = visible;
+        }
+
+        statusLabel.Text = visible ? "グリッドを表示しました" : "グリッドを非表示にしました";
     }
 
     private void RefreshAttributeValueSelector(MapEditorDocument? document)
@@ -2622,6 +2637,7 @@ public sealed class MainForm : Form
         redoMenuItem.Enabled = redoButton.Enabled;
         saveMapEditMenuItem.Enabled = activeEditorKind == ActiveEditorKind.Map && hasDocument;
         saveMapAsEditMenuItem.Enabled = saveMapEditMenuItem.Enabled;
+        gridMenuItem.Enabled = activeEditorKind == ActiveEditorKind.Map;
         closeMapMenuItem.Enabled = hasDocument;
         closeMapTabMenuItem.Enabled = hasDocument;
         penToolButton.Enabled = hasDocument;
