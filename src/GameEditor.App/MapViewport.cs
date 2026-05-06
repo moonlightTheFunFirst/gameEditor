@@ -17,6 +17,7 @@ public sealed class MapViewport : ScrollableControl
     private readonly List<MapStampCell> mapStampCells = [];
     private Size mapStampSize = new(1, 1);
     private Rectangle? mapStampSourceRange;
+    private Size stampPreviewSize = new(1, 1);
     private bool mapStampSelectionActive;
     private Point mapStampSelectionStart;
     private Point mapStampSelectionCurrent;
@@ -642,7 +643,7 @@ public sealed class MapViewport : ScrollableControl
 
     private bool IsStampPreviewActive(MapEditTool tool)
     {
-        return tool == MapEditTool.Pen;
+        return tool == MapEditTool.Pen || tool == MapEditTool.Attribute;
     }
 
     private bool HasActiveStamp()
@@ -885,27 +886,28 @@ public sealed class MapViewport : ScrollableControl
         }
 
         var placement = document.GetTile(kind, x, y);
+        if (placement.IsEmpty)
+        {
+            return;
+        }
+
+        var destination = new Rectangle(
+            x * document.TileSize,
+            y * document.TileSize,
+            document.TileSize,
+            document.TileSize);
+        using (var dimBrush = new SolidBrush(Color.FromArgb(138, 0, 0, 0)))
+        {
+            graphics.FillRectangle(dimBrush, destination);
+        }
+
         var attributeValues = placement.AttributeValues;
         if (attributeValues.Count == 0)
         {
             return;
         }
 
-        using (var dimBrush = new SolidBrush(Color.FromArgb(92, 0, 0, 0)))
-        {
-            graphics.FillRectangle(
-                dimBrush,
-                x * document.TileSize,
-                y * document.TileSize,
-                document.TileSize,
-                document.TileSize);
-        }
-
-        DrawAttributeLabel(graphics, GetAttributeAbbreviation(attributeValues, list), new Rectangle(
-            x * document.TileSize,
-            y * document.TileSize,
-            document.TileSize,
-            document.TileSize));
+        DrawAttributeLabel(graphics, GetAttributeAbbreviation(attributeValues, list), destination);
     }
 
     private void DrawAttributeLabel(Graphics graphics, string label, Rectangle destination)
@@ -965,12 +967,11 @@ public sealed class MapViewport : ScrollableControl
             return;
         }
 
-        var stampSize = GetStampSize();
         var rectangle = new Rectangle(
             cell.X * document.TileSize,
             cell.Y * document.TileSize,
-            stampSize.Width * document.TileSize,
-            stampSize.Height * document.TileSize);
+            stampPreviewSize.Width * document.TileSize,
+            stampPreviewSize.Height * document.TileSize);
 
         using var brush = new SolidBrush(Color.FromArgb(28, 255, 224, 64));
         using var pen = new Pen(Color.FromArgb(255, 255, 224, 64), 2f);
@@ -1057,6 +1058,7 @@ public sealed class MapViewport : ScrollableControl
         {
             InvalidateStampPreview();
             stampPreviewCell = null;
+            stampPreviewSize = new Size(1, 1);
             return;
         }
 
@@ -1070,16 +1072,19 @@ public sealed class MapViewport : ScrollableControl
         {
             InvalidateStampPreview();
             stampPreviewCell = null;
+            stampPreviewSize = new Size(1, 1);
             return;
         }
 
-        if (stampPreviewCell == cell)
+        var previewSize = GetStampPreviewSize(tool);
+        if (stampPreviewCell == cell && stampPreviewSize == previewSize)
         {
             return;
         }
 
         InvalidateStampPreview();
         stampPreviewCell = cell;
+        stampPreviewSize = previewSize;
         InvalidateStampPreview();
     }
 
@@ -1100,14 +1105,20 @@ public sealed class MapViewport : ScrollableControl
             return ClientRectangle;
         }
 
-        var stampSize = GetStampSize();
         var rectangle = new Rectangle(
             cell.X * document.TileSize + AutoScrollPosition.X,
             cell.Y * document.TileSize + AutoScrollPosition.Y,
-            stampSize.Width * document.TileSize + 1,
-            stampSize.Height * document.TileSize + 1);
+            stampPreviewSize.Width * document.TileSize + 1,
+            stampPreviewSize.Height * document.TileSize + 1);
         rectangle.Inflate(3, 3);
         return rectangle;
+    }
+
+    private Size GetStampPreviewSize(MapEditTool tool)
+    {
+        return tool == MapEditTool.Attribute
+            ? new Size(1, 1)
+            : GetStampSize();
     }
 
     private void DrawEmptyState(Graphics graphics)
