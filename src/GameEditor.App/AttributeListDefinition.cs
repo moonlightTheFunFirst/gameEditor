@@ -11,6 +11,7 @@ public sealed class AttributeListDefinition
         Id = id;
         Name = name;
         Values = values;
+        EnsureBuiltInAttributes();
     }
 
     public string Id { get; set; } = "";
@@ -18,6 +19,11 @@ public sealed class AttributeListDefinition
     public string Name { get; set; } = "";
 
     public List<AttributeDefinition> Values { get; set; } = [];
+
+    public bool EnsureBuiltInAttributes()
+    {
+        return AttributeDefinition.EnsureBuiltInDefaults(Values);
+    }
 
     public AttributeDefinition? FindValue(int value)
     {
@@ -29,4 +35,3 @@ public sealed class AttributeListDefinition
         return string.IsNullOrWhiteSpace(Name) ? Id : Name;
     }
 }
-

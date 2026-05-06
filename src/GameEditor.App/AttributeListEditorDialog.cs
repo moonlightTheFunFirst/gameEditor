@@ -203,10 +203,7 @@ public sealed class AttributeListEditorDialog : Form
         var list = new AttributeListDefinition(
             $"attributes-{index}",
             $"Attributes {index}",
-            [
-                new AttributeDefinition(0, "None", Color.Transparent),
-                new AttributeDefinition(1, "Blocked", Color.FromArgb(160, 220, 50, 50))
-            ]);
+            AttributeDefinition.CreateBuiltInDefaults().ToList());
 
         attributeLists.Add(list);
         RefreshLists();
@@ -250,7 +247,7 @@ public sealed class AttributeListEditorDialog : Form
 
         if (IsDefaultAttribute(value))
         {
-            MessageBox.Show(this, "デフォルト属性は削除できません。", "属性", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show(this, "組み込み属性は削除できません。", "属性", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
 
@@ -268,11 +265,32 @@ public sealed class AttributeListEditorDialog : Form
         }
 
         e.Cancel = true;
-        MessageBox.Show(this, "デフォルト属性は削除できません。", "属性", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        MessageBox.Show(this, "組み込み属性は削除できません。", "属性", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
     private void ValuesCellValidating(object? sender, DataGridViewCellValidatingEventArgs e)
     {
+        if (values.Columns[e.ColumnIndex].DataPropertyName == nameof(AttributeDefinition.Value)
+            && values.Rows[e.RowIndex].DataBoundItem is AttributeDefinition editedDefinition
+            && int.TryParse(e.FormattedValue?.ToString(), out var requestedValue))
+        {
+            if (IsDefaultAttribute(editedDefinition) && requestedValue != editedDefinition.Value)
+            {
+                e.Cancel = true;
+                MessageBox.Show(this, "組み込み属性の値は変更できません。", "属性", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            if (!IsDefaultAttribute(editedDefinition) && AttributeDefinition.IsBuiltInValue(requestedValue))
+            {
+                e.Cancel = true;
+                MessageBox.Show(this, "組み込み属性の値は使用できません。", "属性", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            return;
+        }
+
         if (values.Columns[e.ColumnIndex].DataPropertyName != nameof(AttributeDefinition.Value)
             || values.Rows[e.RowIndex].DataBoundItem is not AttributeDefinition value
             || !IsDefaultAttribute(value))
@@ -286,7 +304,7 @@ public sealed class AttributeListEditorDialog : Form
         }
 
         e.Cancel = true;
-        MessageBox.Show(this, "デフォルト属性の値は変更できません。", "属性", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        MessageBox.Show(this, "組み込み属性の値は変更できません。", "属性", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
     private void UpdateValueActions()
@@ -318,13 +336,10 @@ public sealed class AttributeListEditorDialog : Form
     {
         foreach (var list in attributeLists)
         {
-            if (list.Values.Any(IsDefaultAttribute))
+            if (list.EnsureBuiltInAttributes())
             {
-                continue;
+                MarkDirty();
             }
-
-            list.Values.Insert(0, new AttributeDefinition(0, "None", Color.Transparent));
-            MarkDirty();
         }
     }
 
@@ -399,7 +414,7 @@ public sealed class AttributeListEditorDialog : Form
 
     private static bool IsDefaultAttribute(AttributeDefinition value)
     {
-        return value.Value == 0;
+        return AttributeDefinition.IsBuiltInValue(value.Value);
     }
 
     private static AttributeListDefinition CloneList(AttributeListDefinition list)
