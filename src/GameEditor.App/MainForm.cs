@@ -1260,16 +1260,21 @@ public sealed class MainForm : Form
         var document = CurrentDocument;
         using var dialog = new AttributeListEditorDialog(
             document?.Map.AttributeLists ?? editorAttributeLists,
-            lists => ApplyEditedAttributeLists(lists, saveImmediately: true));
+            (lists, valueRemaps) => ApplyEditedAttributeLists(lists, valueRemaps, saveImmediately: true),
+            HasAttributeValueUsage);
         if (dialog.ShowDialog(this) != DialogResult.OK)
         {
             return;
         }
     }
 
-    private bool ApplyEditedAttributeLists(IReadOnlyList<AttributeListDefinition> source, bool saveImmediately)
+    private bool ApplyEditedAttributeLists(
+        IReadOnlyList<AttributeListDefinition> source,
+        IReadOnlyDictionary<string, Dictionary<int, int?>> valueRemaps,
+        bool saveImmediately)
     {
         var document = CurrentDocument;
+        ApplyAttributeValueRemaps(document, valueRemaps);
         var editedLists = source
             .Select(list => new AttributeListDefinition(
                 list.Id,
@@ -1323,6 +1328,143 @@ public sealed class MainForm : Form
 
         return !dirtyTileAttributeKinds.Contains(TileSetKind.Base)
             && !dirtyTileAttributeKinds.Contains(TileSetKind.Advanced);
+    }
+
+    private bool HasAttributeValueUsage(string attributeListId, int attributeValue)
+    {
+        var document = CurrentDocument;
+        if (document is null)
+        {
+            return TileSetUsesAttributeValue(previewBaseTileSet, attributeListId, attributeValue, editorActiveAttributeListId)
+                || TileSetUsesAttributeValue(previewAdvancedTileSet, attributeListId, attributeValue, editorActiveAttributeListId);
+        }
+
+        return document.TileSets.Any(tileSet =>
+            TileSetUsesAttributeValue(tileSet, attributeListId, attributeValue, document.Map.ActiveAttributeListId)
+            || MapUsesAttributeValue(document.Map, tileSet, attributeListId, attributeValue));
+    }
+
+    private void ApplyAttributeValueRemaps(
+        MapEditorDocument? document,
+        IReadOnlyDictionary<string, Dictionary<int, int?>> valueRemaps)
+    {
+        if (valueRemaps.Count == 0)
+        {
+            return;
+        }
+
+        if (document is null)
+        {
+            var baseChanged = ApplyAttributeValueRemap(previewBaseTileSet, valueRemaps, editorActiveAttributeListId);
+            var advancedChanged = ApplyAttributeValueRemap(previewAdvancedTileSet, valueRemaps, editorActiveAttributeListId);
+            selectedAttributeValues = RemapAttributeSelection(selectedAttributeValues, editorActiveAttributeListId, valueRemaps);
+            if (baseChanged)
+            {
+                basePalette.Invalidate();
+            }
+
+            if (advancedChanged)
+            {
+                advancedPalette.Invalidate();
+            }
+
+            return;
+        }
+
+        var changed = false;
+        foreach (var tileSet in document.TileSets)
+        {
+            if (ApplyAttributeValueRemap(tileSet, valueRemaps, document.Map.ActiveAttributeListId))
+            {
+                MarkTileAttributesDirty(tileSet.Kind);
+                changed = true;
+            }
+
+            if (TryGetAttributeValueRemap(tileSet, valueRemaps, document.Map.ActiveAttributeListId, out var valueRemap)
+                && document.Map.RemapAttributes(tileSet.Kind, valueRemap))
+            {
+                changed = true;
+            }
+        }
+
+        selectedAttributeValues = RemapAttributeSelection(
+            selectedAttributeValues,
+            document.Map.ActiveAttributeListId,
+            valueRemaps);
+        if (changed)
+        {
+            document.Viewport.Invalidate();
+        }
+    }
+
+    private static bool ApplyAttributeValueRemap(
+        TileSet? tileSet,
+        IReadOnlyDictionary<string, Dictionary<int, int?>> valueRemaps,
+        string? fallbackAttributeListId)
+    {
+        return tileSet is not null
+            && TryGetAttributeValueRemap(tileSet, valueRemaps, fallbackAttributeListId, out var valueRemap)
+            && tileSet.RemapDefaultAttributes(valueRemap);
+    }
+
+    private static IReadOnlyList<int> RemapAttributeSelection(
+        IReadOnlyList<int> values,
+        string? attributeListId,
+        IReadOnlyDictionary<string, Dictionary<int, int?>> valueRemaps)
+    {
+        return attributeListId is not null && valueRemaps.TryGetValue(attributeListId, out var valueRemap)
+            ? TilePlacement.RemapAttributeValues(values, valueRemap)
+            : values;
+    }
+
+    private static bool TileSetUsesAttributeValue(
+        TileSet? tileSet,
+        string attributeListId,
+        int attributeValue,
+        string? fallbackAttributeListId)
+    {
+        return TileSetUsesAttributeList(tileSet, attributeListId, fallbackAttributeListId)
+            && tileSet!.ContainsDefaultAttribute(attributeValue);
+    }
+
+    private static bool MapUsesAttributeValue(
+        MapDocument document,
+        TileSet tileSet,
+        string attributeListId,
+        int attributeValue)
+    {
+        return TileSetUsesAttributeList(tileSet, attributeListId, document.ActiveAttributeListId)
+            && document.ContainsAttributeValue(tileSet.Kind, attributeValue);
+    }
+
+    private static bool TryGetAttributeValueRemap(
+        TileSet? tileSet,
+        IReadOnlyDictionary<string, Dictionary<int, int?>> valueRemaps,
+        string? fallbackAttributeListId,
+        out Dictionary<int, int?> valueRemap)
+    {
+        valueRemap = [];
+        if (tileSet is null)
+        {
+            return false;
+        }
+
+        var attributeListId = tileSet?.AttributeListId ?? fallbackAttributeListId;
+        return attributeListId is not null && valueRemaps.TryGetValue(attributeListId, out valueRemap!);
+    }
+
+    private static bool TileSetUsesAttributeList(
+        TileSet? tileSet,
+        string attributeListId,
+        string? fallbackAttributeListId)
+    {
+        if (tileSet is null)
+        {
+            return false;
+        }
+
+        var tileSetAttributeListId = tileSet?.AttributeListId ?? fallbackAttributeListId;
+        return string.Equals(tileSetAttributeListId, attributeListId, StringComparison.Ordinal);
     }
 
     private void SetSelectedTileDefaultAttribute()

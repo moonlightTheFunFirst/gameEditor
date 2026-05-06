@@ -137,6 +137,40 @@ public sealed class MapDocument
         return new AttributeChange(x, y, before, after);
     }
 
+    public bool ContainsAttributeValue(TileSetKind kind, int attributeValue)
+    {
+        return EnumerateTiles(kind)
+            .Any(tile => tile.Placement.AttributeValues.Contains(attributeValue));
+    }
+
+    public bool RemapAttributes(TileSetKind kind, IReadOnlyDictionary<int, int?> valueRemap)
+    {
+        var changed = false;
+        var layer = GetLayer(kind);
+        for (var y = 0; y < Height; y++)
+        {
+            for (var x = 0; x < Width; x++)
+            {
+                var placement = layer[x, y];
+                if (placement.IsEmpty)
+                {
+                    continue;
+                }
+
+                var remapped = TilePlacement.RemapAttributeValuesCsv(placement.AttributeValuesCsv, valueRemap);
+                if (string.Equals(placement.AttributeValuesCsv, remapped, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                layer[x, y] = placement with { AttributeValuesCsv = remapped };
+                changed = true;
+            }
+        }
+
+        return changed;
+    }
+
     public IReadOnlyList<TileChange> FloodFillWithChanges(TileSetKind kind, int x, int y, TilePlacement replacement)
     {
         if (!IsInside(x, y))

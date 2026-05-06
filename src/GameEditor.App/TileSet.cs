@@ -122,6 +122,38 @@ public sealed class TileSet : IDisposable
         TileAttributes[tileId] = csv;
     }
 
+    public bool ContainsDefaultAttribute(int attributeValue)
+    {
+        return TileAttributes.Values
+            .Any(value => TilePlacement.ParseAttributeValues(value).Contains(attributeValue));
+    }
+
+    public bool RemapDefaultAttributes(IReadOnlyDictionary<int, int?> valueRemap)
+    {
+        var changed = false;
+        foreach (var (tileId, value) in TileAttributes.ToArray())
+        {
+            var remapped = TilePlacement.RemapAttributeValuesCsv(value, valueRemap);
+            if (string.Equals(value, remapped, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (string.IsNullOrEmpty(remapped))
+            {
+                TileAttributes.Remove(tileId);
+            }
+            else
+            {
+                TileAttributes[tileId] = remapped;
+            }
+
+            changed = true;
+        }
+
+        return changed;
+    }
+
     public Rectangle GetSourceRectangle(int tileId)
     {
         if (tileId < 0 || tileId >= TileCount)
