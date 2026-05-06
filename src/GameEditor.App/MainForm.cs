@@ -34,10 +34,17 @@ public sealed class MainForm : Form
     private readonly ToolStripButton fillToolButton = new("塗りつぶし");
     private readonly ToolStripButton eraserToolButton = new("消しゴム");
     private readonly ToolStripButton attributeToolButton = new("属性");
-    private readonly ToolStripButton paletteAttributeModeButton = new("パレット属性");
+    private readonly ToolStripButton basePaletteAttributeModeButton = new("パレット属性");
+    private readonly ToolStripButton advancedPaletteAttributeModeButton = new("パレット属性");
     private readonly ToolStripLabel attributeListLabel = new("属性リスト:");
     private readonly ToolStripComboBox attributeListSelector = new();
+    private readonly ToolStripLabel attributeLayerLabel = new("対象:");
+    private readonly ToolStripComboBox attributeLayerSelector = new();
+    private readonly ToolStripComboBox baseChipAttributeListSelector = new();
+    private readonly ToolStripComboBox advancedChipAttributeListSelector = new();
     private readonly ToolStripButton attributeSetButton = new("属性選択...");
+    private readonly ToolStripButton baseChipAttributeSetButton = new("属性: なし");
+    private readonly ToolStripButton advancedChipAttributeSetButton = new("属性: なし");
     private readonly ToolStripButton editAttributeListsButton = new("属性リスト");
     private readonly ToolStripButton undoButton = new("元に戻す");
     private readonly ToolStripButton redoButton = new("やり直し");
@@ -307,6 +314,27 @@ public sealed class MainForm : Form
         return editorToolStrip;
     }
 
+    private static void ConfigureAttributeListSelector(ToolStripComboBox selector, int width)
+    {
+        selector.DropDownStyle = ComboBoxStyle.DropDownList;
+        selector.AutoSize = false;
+        selector.Width = width;
+        selector.ComboBox.DisplayMember = nameof(AttributeListDefinition.Name);
+        selector.ComboBox.ValueMember = nameof(AttributeListDefinition.Id);
+    }
+
+    private void ConfigureMapAttributeLayerSelector()
+    {
+        attributeLayerSelector.DropDownStyle = ComboBoxStyle.DropDownList;
+        attributeLayerSelector.AutoSize = false;
+        attributeLayerSelector.Width = 90;
+        attributeLayerSelector.Items.Clear();
+        attributeLayerSelector.Items.Add("ベース");
+        attributeLayerSelector.Items.Add("アドバンス");
+        attributeLayerSelector.SelectedIndex = selectedMapAttributeLayerKind == TileSetKind.Advanced ? 1 : 0;
+        attributeLayerSelector.SelectedIndexChanged += (_, _) => ChangeMapAttributeLayer();
+    }
+
     private void AddMapToolStripItems()
     {
         if (mapToolStripItems.Count > 0)
@@ -326,17 +354,13 @@ public sealed class MainForm : Form
         mapToolStripItems.Add(ConfigureToolButton(eraserToolButton, MapEditTool.Eraser));
         mapToolStripItems.Add(ConfigureToolButton(attributeToolButton, MapEditTool.Attribute));
         mapToolStripItems.Add(new ToolStripSeparator());
-        paletteAttributeModeButton.CheckOnClick = true;
-        paletteAttributeModeButton.Click += (_, _) => SetPaletteAttributeMode(paletteAttributeModeButton.Checked);
-        mapToolStripItems.Add(paletteAttributeModeButton);
-        attributeListSelector.DropDownStyle = ComboBoxStyle.DropDownList;
-        attributeListSelector.AutoSize = false;
-        attributeListSelector.Width = 150;
-        attributeListSelector.ComboBox.DisplayMember = nameof(AttributeListDefinition.Name);
-        attributeListSelector.ComboBox.ValueMember = nameof(AttributeListDefinition.Id);
-        attributeListSelector.SelectedIndexChanged += (_, _) => ChangeActiveAttributeList();
+        ConfigureAttributeListSelector(attributeListSelector, 150);
+        attributeListSelector.SelectedIndexChanged += (_, _) => ChangeMapAttributeList(attributeListSelector);
         mapToolStripItems.Add(attributeListLabel);
         mapToolStripItems.Add(attributeListSelector);
+        ConfigureMapAttributeLayerSelector();
+        mapToolStripItems.Add(attributeLayerLabel);
+        mapToolStripItems.Add(attributeLayerSelector);
         attributeSetButton.Click += (_, _) => EditSelectedAttributeSet();
         editAttributeListsButton.Click += (_, _) => EditAttributeLists();
         mapToolStripItems.Add(attributeSetButton);
@@ -692,17 +716,58 @@ public sealed class MainForm : Form
             selector.SelectedIndex = 0;
         }
 
+        var chipToolStrip = BuildTileChipToolStrip(kind);
+        palette.Dock = DockStyle.Fill;
+        panel.Controls.Add(palette);
+        panel.Controls.Add(chipToolStrip);
+        panel.Controls.Add(selector);
+        return panel;
+    }
+
+    private Control BuildTileChipToolStrip(TileSetKind kind)
+    {
+        var panel = new Panel
+        {
+            Dock = DockStyle.Top,
+            BackColor = SystemColors.Control
+        };
+
+        var listToolStrip = new ToolStrip
+        {
+            Dock = DockStyle.Top,
+            GripStyle = ToolStripGripStyle.Hidden
+        };
+        var chipAttributeListSelector = kind == TileSetKind.Base
+            ? baseChipAttributeListSelector
+            : advancedChipAttributeListSelector;
+        ConfigureAttributeListSelector(chipAttributeListSelector, 118);
+        chipAttributeListSelector.SelectedIndexChanged += (_, _) => ChangeChipAttributeList(kind, chipAttributeListSelector);
+        listToolStrip.Items.Add(new ToolStripLabel("チップ属性リスト:"));
+        listToolStrip.Items.Add(chipAttributeListSelector);
+
         var toolStrip = new ToolStrip
         {
             Dock = DockStyle.Top,
             GripStyle = ToolStripGripStyle.Hidden
         };
-        toolStrip.Items.Add(new ToolStripButton("保存", null, (_, _) => SaveTileAttributes(kind)));
 
-        palette.Dock = DockStyle.Fill;
-        panel.Controls.Add(palette);
+        var attributeModeButton = kind == TileSetKind.Base
+            ? basePaletteAttributeModeButton
+            : advancedPaletteAttributeModeButton;
+        attributeModeButton.CheckOnClick = true;
+        attributeModeButton.Click += (_, _) => SetPaletteAttributeMode(attributeModeButton.Checked);
+        var chipAttributeSetButton = kind == TileSetKind.Base
+            ? baseChipAttributeSetButton
+            : advancedChipAttributeSetButton;
+        chipAttributeSetButton.Click += (_, _) => EditChipAttributeSet(kind);
+
+        toolStrip.Items.Add(attributeModeButton);
+        toolStrip.Items.Add(chipAttributeSetButton);
+        toolStrip.Items.Add(new ToolStripSeparator());
+        toolStrip.Items.Add(new ToolStripButton("属性保存", null, (_, _) => SaveTileAttributes(kind)));
         panel.Controls.Add(toolStrip);
-        panel.Controls.Add(selector);
+        panel.Controls.Add(listToolStrip);
+        panel.Height = listToolStrip.Height + toolStrip.Height;
         return panel;
     }
 
@@ -1164,6 +1229,7 @@ public sealed class MainForm : Form
     {
         activePalette = tileSetTabs.SelectedIndex == 1 ? advancedPalette : basePalette;
         UpdateSelectedTile();
+        UpdateDocumentActionsState();
     }
 
     private void UpdateSelectedTile()
@@ -1189,6 +1255,7 @@ public sealed class MainForm : Form
         viewport.SelectedTileSet = tileSet;
         viewport.SelectedTileId = activePalette.SelectedTileId;
         viewport.SelectedTileSelection = activePalette.SelectedTileSelection;
+        viewport.SelectedAttributeLayerKind = selectedMapAttributeLayerKind;
         viewport.SelectedAttributeValues = GetSelectedAttributeValues();
         viewport.EditTool = currentEditTool;
         viewport.SecondaryEditTool = currentSecondaryEditTool;
@@ -1197,14 +1264,13 @@ public sealed class MainForm : Form
 
     private void UpdatePaletteAttributeContext(MapEditorDocument? document)
     {
-        var list = GetActiveAttributeList(document);
-        var values = GetSelectedAttributeValues();
-        basePalette.AttributeList = list;
-        advancedPalette.AttributeList = list;
-        basePalette.SelectedAttributeValues = values;
-        advancedPalette.SelectedAttributeValues = values;
-        basePalette.AttributeMode = paletteAttributeModeButton.Checked;
-        advancedPalette.AttributeMode = paletteAttributeModeButton.Checked;
+        basePalette.AttributeList = GetTileSetAttributeList(TileSetKind.Base, document);
+        advancedPalette.AttributeList = GetTileSetAttributeList(TileSetKind.Advanced, document);
+        basePalette.SelectedAttributeValues = GetSelectedChipAttributeValues(TileSetKind.Base);
+        advancedPalette.SelectedAttributeValues = GetSelectedChipAttributeValues(TileSetKind.Advanced);
+        var paletteAttributeMode = IsPaletteAttributeModeEnabled();
+        basePalette.AttributeMode = paletteAttributeMode;
+        advancedPalette.AttributeMode = paletteAttributeMode;
     }
 
     private void RefreshAttributeListSelector(MapEditorDocument? document)
@@ -1212,33 +1278,49 @@ public sealed class MainForm : Form
         updatingAttributeListSelector = true;
         try
         {
-            attributeListSelector.Items.Clear();
             var lists = document?.Map.AttributeLists ?? editorAttributeLists;
-            foreach (var list in lists)
-            {
-                attributeListSelector.Items.Add(list);
-            }
-
             var activeAttributeListId = document?.Map.ActiveAttributeListId ?? editorActiveAttributeListId;
-            var selectedIndex = -1;
-            for (var i = 0; i < attributeListSelector.Items.Count; i++)
-            {
-                if (attributeListSelector.Items[i] is AttributeListDefinition list
-                    && string.Equals(list.Id, activeAttributeListId, StringComparison.Ordinal))
-                {
-                    selectedIndex = i;
-                    break;
-                }
-            }
-
-            attributeListSelector.SelectedIndex = selectedIndex >= 0
-                ? selectedIndex
-                : attributeListSelector.Items.Count > 0 ? 0 : -1;
+            RefreshAttributeListSelectorItems(attributeListSelector, lists, activeAttributeListId);
+            RefreshAttributeListSelectorItems(
+                baseChipAttributeListSelector,
+                lists,
+                GetTileSetAttributeListId(GetActiveTileSet(TileSetKind.Base), document));
+            RefreshAttributeListSelectorItems(
+                advancedChipAttributeListSelector,
+                lists,
+                GetTileSetAttributeListId(GetActiveTileSet(TileSetKind.Advanced), document));
         }
         finally
         {
             updatingAttributeListSelector = false;
         }
+    }
+
+    private static void RefreshAttributeListSelectorItems(
+        ToolStripComboBox selector,
+        IEnumerable<AttributeListDefinition> lists,
+        string? activeAttributeListId)
+    {
+        selector.Items.Clear();
+        foreach (var list in lists)
+        {
+            selector.Items.Add(list);
+        }
+
+        var selectedIndex = -1;
+        for (var i = 0; i < selector.Items.Count; i++)
+        {
+            if (selector.Items[i] is AttributeListDefinition list
+                && string.Equals(list.Id, activeAttributeListId, StringComparison.Ordinal))
+            {
+                selectedIndex = i;
+                break;
+            }
+        }
+
+        selector.SelectedIndex = selectedIndex >= 0
+            ? selectedIndex
+            : selector.Items.Count > 0 ? 0 : -1;
     }
 
     private AttributeListDefinition? GetActiveAttributeList(MapEditorDocument? document)
@@ -1248,12 +1330,39 @@ public sealed class MainForm : Form
             ?? editorAttributeLists.FirstOrDefault();
     }
 
+    private AttributeListDefinition? GetTileSetAttributeList(TileSetKind kind, MapEditorDocument? document)
+    {
+        return GetAttributeListById(document, GetTileSetAttributeListId(GetActiveTileSet(kind), document))
+            ?? GetActiveAttributeList(document);
+    }
+
+    private AttributeListDefinition? GetAttributeListById(MapEditorDocument? document, string? attributeListId)
+    {
+        var lists = document?.Map.AttributeLists ?? editorAttributeLists;
+        return attributeListId is null
+            ? null
+            : lists.FirstOrDefault(list => string.Equals(list.Id, attributeListId, StringComparison.Ordinal));
+    }
+
+    private string? GetTileSetAttributeListId(TileSet? tileSet, MapEditorDocument? document)
+    {
+        return tileSet?.AttributeListId
+            ?? document?.Map.ActiveAttributeListId
+            ?? editorActiveAttributeListId;
+    }
+
     private void SetPaletteAttributeMode(bool enabled)
     {
-        paletteAttributeModeButton.Checked = enabled;
+        basePaletteAttributeModeButton.Checked = enabled;
+        advancedPaletteAttributeModeButton.Checked = enabled;
         UpdatePaletteAttributeContext(CurrentDocument);
         RefreshProperties();
         statusLabel.Text = enabled ? "パレット属性モード" : "パレット通常モード";
+    }
+
+    private bool IsPaletteAttributeModeEnabled()
+    {
+        return basePaletteAttributeModeButton.Checked || advancedPaletteAttributeModeButton.Checked;
     }
 
     private void SetMapGridVisible(bool visible)
@@ -1270,12 +1379,16 @@ public sealed class MainForm : Form
     private void RefreshAttributeValueSelector(MapEditorDocument? document)
     {
         attributeSetButton.Text = $"属性: {FormatAttributeSet(GetSelectedAttributeValues(), GetActiveAttributeList(document))}";
+        baseChipAttributeSetButton.Text =
+            $"属性: {FormatAttributeSet(GetSelectedChipAttributeValues(TileSetKind.Base), GetTileSetAttributeList(TileSetKind.Base, document))}";
+        advancedChipAttributeSetButton.Text =
+            $"属性: {FormatAttributeSet(GetSelectedChipAttributeValues(TileSetKind.Advanced), GetTileSetAttributeList(TileSetKind.Advanced, document))}";
     }
 
-    private void ChangeActiveAttributeList()
+    private void ChangeMapAttributeList(ToolStripComboBox selector)
     {
         if (updatingAttributeListSelector
-            || attributeListSelector.SelectedItem is not AttributeListDefinition selected)
+            || selector.SelectedItem is not AttributeListDefinition selected)
         {
             return;
         }
@@ -1295,6 +1408,56 @@ public sealed class MainForm : Form
 
         SetActiveAttributeList(document, selected.Id, resetMapAttributes: true);
         statusLabel.Text = $"属性リスト: {selected.Name}";
+    }
+
+    private void ChangeMapAttributeLayer()
+    {
+        var nextKind = attributeLayerSelector.SelectedIndex == 1
+            ? TileSetKind.Advanced
+            : TileSetKind.Base;
+        if (selectedMapAttributeLayerKind == nextKind)
+        {
+            return;
+        }
+
+        selectedMapAttributeLayerKind = nextKind;
+        RefreshAttributeValueSelector(CurrentDocument);
+        SyncCurrentViewportSelection();
+        RefreshProperties();
+        statusLabel.Text = $"属性対象: {GetKindName(nextKind)}";
+    }
+
+    private void ChangeChipAttributeList(TileSetKind kind, ToolStripComboBox selector)
+    {
+        if (updatingAttributeListSelector
+            || selector.SelectedItem is not AttributeListDefinition selected)
+        {
+            return;
+        }
+
+        var document = CurrentDocument;
+        var tileSet = GetActiveTileSet(kind);
+        if (tileSet is null)
+        {
+            RefreshAttributeListSelector(document);
+            return;
+        }
+
+        var currentAttributeListId = GetTileSetAttributeListId(tileSet, document);
+        if (string.Equals(currentAttributeListId, selected.Id, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        tileSet.AttributeListId = selected.Id;
+        SetSelectedChipAttributeValues(kind, []);
+        MarkTileAttributesDirty(kind);
+        UpdatePaletteAttributeContext(document);
+        RefreshAttributeListSelector(document);
+        RefreshAttributeValueSelector(document);
+        RefreshProperties();
+        UpdateDocumentActionsState();
+        statusLabel.Text = $"チップ属性リスト: {selected.Name}";
     }
 
     private bool ConfirmChangeActiveAttributeList()
@@ -1319,7 +1482,8 @@ public sealed class MainForm : Form
             ApplyActiveAttributeListToPreviewTileSets();
             MarkTileAttributesDirty(TileSetKind.Base);
             MarkTileAttributesDirty(TileSetKind.Advanced);
-            selectedAttributeValues = [];
+            ClearSelectedMapAttributeValues();
+            ClearSelectedChipAttributeValues();
             RefreshAttributeListSelector(null);
             RefreshAttributeValueSelector(null);
             UpdatePaletteAttributeContext(null);
@@ -1339,7 +1503,8 @@ public sealed class MainForm : Form
             }
         }
 
-        selectedAttributeValues = [];
+        ClearSelectedMapAttributeValues();
+        ClearSelectedChipAttributeValues();
         document.IsDirty = true;
         MarkProjectDirtyForDocument(document);
         UpdateDocumentTabTitle(document);
@@ -1352,27 +1517,92 @@ public sealed class MainForm : Form
         UpdateDocumentActionsState();
     }
 
-    private IReadOnlyList<int> selectedAttributeValues = [];
+    private TileSetKind selectedMapAttributeLayerKind = TileSetKind.Base;
+    private IReadOnlyList<int> selectedBaseMapAttributeValues = [];
+    private IReadOnlyList<int> selectedAdvancedMapAttributeValues = [];
+    private IReadOnlyList<int> selectedBaseChipAttributeValues = [];
+    private IReadOnlyList<int> selectedAdvancedChipAttributeValues = [];
 
     private IReadOnlyList<int> GetSelectedAttributeValues()
     {
-        return selectedAttributeValues;
+        return GetSelectedMapAttributeValues(selectedMapAttributeLayerKind);
+    }
+
+    private IReadOnlyList<int> GetSelectedMapAttributeValues(TileSetKind kind)
+    {
+        return kind == TileSetKind.Base
+            ? selectedBaseMapAttributeValues
+            : selectedAdvancedMapAttributeValues;
+    }
+
+    private void SetSelectedMapAttributeValues(TileSetKind kind, IReadOnlyList<int> values)
+    {
+        if (kind == TileSetKind.Base)
+        {
+            selectedBaseMapAttributeValues = values;
+            return;
+        }
+
+        selectedAdvancedMapAttributeValues = values;
+    }
+
+    private void ClearSelectedMapAttributeValues()
+    {
+        selectedBaseMapAttributeValues = [];
+        selectedAdvancedMapAttributeValues = [];
+    }
+
+    private IReadOnlyList<int> GetSelectedChipAttributeValues(TileSetKind kind)
+    {
+        return kind == TileSetKind.Base
+            ? selectedBaseChipAttributeValues
+            : selectedAdvancedChipAttributeValues;
+    }
+
+    private void SetSelectedChipAttributeValues(TileSetKind kind, IReadOnlyList<int> values)
+    {
+        if (kind == TileSetKind.Base)
+        {
+            selectedBaseChipAttributeValues = values;
+            return;
+        }
+
+        selectedAdvancedChipAttributeValues = values;
+    }
+
+    private void ClearSelectedChipAttributeValues()
+    {
+        selectedBaseChipAttributeValues = [];
+        selectedAdvancedChipAttributeValues = [];
     }
 
     private void EditSelectedAttributeSet()
     {
         var document = CurrentDocument;
-        using var dialog = new AttributeSetEditorDialog(GetActiveAttributeList(document), selectedAttributeValues);
+        using var dialog = new AttributeSetEditorDialog(GetActiveAttributeList(document), GetSelectedAttributeValues());
         if (dialog.ShowDialog(this) != DialogResult.OK)
         {
             return;
         }
 
-        selectedAttributeValues = dialog.SelectedValues;
+        SetSelectedMapAttributeValues(selectedMapAttributeLayerKind, dialog.SelectedValues);
         RefreshAttributeValueSelector(document);
-        basePalette.SelectedAttributeValues = selectedAttributeValues;
-        advancedPalette.SelectedAttributeValues = selectedAttributeValues;
         SyncCurrentViewportSelection();
+        RefreshProperties();
+    }
+
+    private void EditChipAttributeSet(TileSetKind kind)
+    {
+        var document = CurrentDocument;
+        using var dialog = new AttributeSetEditorDialog(GetTileSetAttributeList(kind, document), GetSelectedChipAttributeValues(kind));
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        SetSelectedChipAttributeValues(kind, dialog.SelectedValues);
+        RefreshAttributeValueSelector(document);
+        UpdatePaletteAttributeContext(document);
         RefreshProperties();
     }
 
@@ -1381,16 +1611,16 @@ public sealed class MainForm : Form
         var document = CurrentDocument;
         if (document is null)
         {
-            args.TileSet.AttributeListId = editorActiveAttributeListId;
+            args.TileSet.AttributeListId ??= editorActiveAttributeListId;
             MarkTileAttributesDirty(args.TileSet.Kind);
             RefreshProperties();
             statusLabel.Text = args.AttributeValues.Count > 0
-                ? $"タイル {args.TileId} の属性: {FormatAttributeSet(args.AttributeValues, GetActiveAttributeList(null))}"
+                ? $"タイル {args.TileId} の属性: {FormatAttributeSet(args.AttributeValues, GetTileSetAttributeList(args.TileSet.Kind, null))}"
                 : $"タイル {args.TileId} の属性をクリアしました";
             return;
         }
 
-        args.TileSet.AttributeListId = document.Map.ActiveAttributeListId;
+        args.TileSet.AttributeListId ??= document.Map.ActiveAttributeListId;
         MarkTileAttributesDirty(args.TileSet.Kind);
         document.IsDirty = true;
         MarkProjectDirtyForDocument(document);
@@ -1398,7 +1628,7 @@ public sealed class MainForm : Form
         document.Viewport.Invalidate();
         RefreshProperties();
         statusLabel.Text = args.AttributeValues.Count > 0
-            ? $"タイル {args.TileId} の属性: {FormatAttributeSet(args.AttributeValues, document.Map.ActiveAttributeList)}"
+            ? $"タイル {args.TileId} の属性: {FormatAttributeSet(args.AttributeValues, GetTileSetAttributeList(args.TileSet.Kind, document))}"
             : $"タイル {args.TileId} の属性をクリアしました";
     }
 
@@ -1436,9 +1666,11 @@ public sealed class MainForm : Form
             editorAttributeLists.Clear();
             editorAttributeLists.AddRange(editedLists);
             editorActiveAttributeListId = activeAttributeListId;
-            ApplyActiveAttributeListToPreviewTileSets();
+            ResolveTileSetAttributeList(previewBaseTileSet, editedLists, editorActiveAttributeListId);
+            ResolveTileSetAttributeList(previewAdvancedTileSet, editedLists, editorActiveAttributeListId);
             MarkTileAttributesDirty(TileSetKind.Base);
             MarkTileAttributesDirty(TileSetKind.Advanced);
+            ClearSelectedChipAttributeValues();
             RefreshAttributeListSelector(null);
             RefreshAttributeValueSelector(null);
             UpdatePaletteAttributeContext(null);
@@ -1460,7 +1692,7 @@ public sealed class MainForm : Form
         document.Map.ActiveAttributeListId = activeAttributeListId;
         foreach (var tileSet in document.TileSets)
         {
-            tileSet.AttributeListId = document.Map.ActiveAttributeListId;
+            tileSet.AttributeListId = ResolveAttributeListId(editedLists, tileSet.AttributeListId ?? document.Map.ActiveAttributeListId);
             MarkTileAttributesDirty(tileSet.Kind);
             if (activeAttributeListChanged)
             {
@@ -1470,8 +1702,9 @@ public sealed class MainForm : Form
 
         if (activeAttributeListChanged)
         {
-            selectedAttributeValues = [];
+            ClearSelectedMapAttributeValues();
         }
+        ClearSelectedChipAttributeValues();
 
         document.IsDirty = true;
         MarkProjectDirtyForDocument(document);
@@ -1517,7 +1750,22 @@ public sealed class MainForm : Form
         {
             var baseChanged = ApplyAttributeValueRemap(previewBaseTileSet, valueRemaps, editorActiveAttributeListId);
             var advancedChanged = ApplyAttributeValueRemap(previewAdvancedTileSet, valueRemaps, editorActiveAttributeListId);
-            selectedAttributeValues = RemapAttributeSelection(selectedAttributeValues, editorActiveAttributeListId, valueRemaps);
+            selectedBaseMapAttributeValues = RemapAttributeSelection(
+                selectedBaseMapAttributeValues,
+                editorActiveAttributeListId,
+                valueRemaps);
+            selectedAdvancedMapAttributeValues = RemapAttributeSelection(
+                selectedAdvancedMapAttributeValues,
+                editorActiveAttributeListId,
+                valueRemaps);
+            selectedBaseChipAttributeValues = RemapAttributeSelection(
+                selectedBaseChipAttributeValues,
+                GetTileSetAttributeListId(previewBaseTileSet, null),
+                valueRemaps);
+            selectedAdvancedChipAttributeValues = RemapAttributeSelection(
+                selectedAdvancedChipAttributeValues,
+                GetTileSetAttributeListId(previewAdvancedTileSet, null),
+                valueRemaps);
             if (baseChanged)
             {
                 basePalette.Invalidate();
@@ -1547,9 +1795,21 @@ public sealed class MainForm : Form
             }
         }
 
-        selectedAttributeValues = RemapAttributeSelection(
-            selectedAttributeValues,
+        selectedBaseMapAttributeValues = RemapAttributeSelection(
+            selectedBaseMapAttributeValues,
             document.Map.ActiveAttributeListId,
+            valueRemaps);
+        selectedAdvancedMapAttributeValues = RemapAttributeSelection(
+            selectedAdvancedMapAttributeValues,
+            document.Map.ActiveAttributeListId,
+            valueRemaps);
+        selectedBaseChipAttributeValues = RemapAttributeSelection(
+            selectedBaseChipAttributeValues,
+            GetTileSetAttributeListId(document.GetTileSet(TileSetKind.Base), document),
+            valueRemaps);
+        selectedAdvancedChipAttributeValues = RemapAttributeSelection(
+            selectedAdvancedChipAttributeValues,
+            GetTileSetAttributeListId(document.GetTileSet(TileSetKind.Advanced), document),
             valueRemaps);
         if (changed)
         {
@@ -1748,6 +2008,19 @@ public sealed class MainForm : Form
             && lists.Any(list => string.Equals(list.Id, preferredAttributeListId, StringComparison.Ordinal))
             ? preferredAttributeListId
             : lists.FirstOrDefault()?.Id;
+    }
+
+    private static void ResolveTileSetAttributeList(
+        TileSet? tileSet,
+        IReadOnlyList<AttributeListDefinition> lists,
+        string? fallbackAttributeListId)
+    {
+        if (tileSet is null)
+        {
+            return;
+        }
+
+        tileSet.AttributeListId = ResolveAttributeListId(lists, tileSet.AttributeListId ?? fallbackAttributeListId);
     }
 
     private static string FormatAttributeSet(IReadOnlyList<int> values, AttributeListDefinition? list)
@@ -2616,6 +2889,8 @@ public sealed class MainForm : Form
         var hasDocument = document is not null;
         var canSave = hasDocument;
         var hasPalette = activeEditorKind == ActiveEditorKind.Map && activePalette?.TileSet is not null;
+        var hasBasePalette = activeEditorKind == ActiveEditorKind.Map && basePalette.TileSet is not null;
+        var hasAdvancedPalette = activeEditorKind == ActiveEditorKind.Map && advancedPalette.TileSet is not null;
         if (mapToolStripItems.Count > 2)
         {
             mapToolStripItems[2].Enabled = canSave;
@@ -2644,11 +2919,18 @@ public sealed class MainForm : Form
         fillToolButton.Enabled = hasDocument;
         eraserToolButton.Enabled = hasDocument;
         attributeToolButton.Enabled = hasDocument;
-        paletteAttributeModeButton.Enabled = hasPalette;
+        basePaletteAttributeModeButton.Enabled = hasBasePalette;
+        advancedPaletteAttributeModeButton.Enabled = hasAdvancedPalette;
         attributeListLabel.Enabled = activeEditorKind == ActiveEditorKind.Map;
         attributeListSelector.Enabled = activeEditorKind == ActiveEditorKind.Map && attributeListSelector.Items.Count > 0;
-        attributeSetButton.Enabled = hasPalette;
+        baseChipAttributeListSelector.Enabled = activeEditorKind == ActiveEditorKind.Map && baseChipAttributeListSelector.Items.Count > 0;
+        advancedChipAttributeListSelector.Enabled = activeEditorKind == ActiveEditorKind.Map && advancedChipAttributeListSelector.Items.Count > 0;
+        attributeSetButton.Enabled = activeEditorKind == ActiveEditorKind.Map && hasDocument;
+        baseChipAttributeSetButton.Enabled = hasBasePalette;
+        advancedChipAttributeSetButton.Enabled = hasAdvancedPalette;
         editAttributeListsButton.Enabled = activeEditorKind == ActiveEditorKind.Map;
+        attributeLayerLabel.Enabled = activeEditorKind == ActiveEditorKind.Map;
+        attributeLayerSelector.Enabled = activeEditorKind == ActiveEditorKind.Map;
         RefreshProperties();
     }
 
@@ -2679,15 +2961,22 @@ public sealed class MainForm : Form
         properties.Items.Add(new ListViewItem(new[] { "Redo", document.History.CanRedo ? "可" : "不可" }));
         properties.Items.Add(new ListViewItem(new[] { "選択チップ", selectedTileId.ToString() }));
         properties.Items.Add(new ListViewItem(new[] { "属性リスト", document.Map.ActiveAttributeList?.Name ?? "未設定" }));
+        properties.Items.Add(new ListViewItem(new[] { "属性対象", GetKindName(selectedMapAttributeLayerKind) }));
         properties.Items.Add(new ListViewItem(new[] { "選択属性", FormatAttributeSet(GetSelectedAttributeValues(), document.Map.ActiveAttributeList) }));
-        properties.Items.Add(new ListViewItem(new[] { "パレット表示", paletteAttributeModeButton.Checked ? "属性" : "通常" }));
+        properties.Items.Add(new ListViewItem(new[] { "パレット表示", IsPaletteAttributeModeEnabled() ? "属性" : "通常" }));
 
         if (tileSet is not null)
         {
             properties.Items.Add(new ListViewItem(new[] { "タイルセット", $"{tileSet.Name} {tileSet.Columns}x{tileSet.Rows}" }));
             properties.Items.Add(new ListViewItem(new[] { "画像", tileSet.ImagePath }));
             properties.Items.Add(new ListViewItem(new[] { "透過色", tileSet.TransparentColor is null ? "なし" : "#FF00FF" }));
-            properties.Items.Add(new ListViewItem(new[] { "チップ既定属性", selectedTileId >= 0 ? FormatAttributeSet(tileSet.GetDefaultAttributes(selectedTileId), document.Map.ActiveAttributeList) : "未設定" }));
+            properties.Items.Add(new ListViewItem(new[]
+            {
+                "チップ既定属性",
+                selectedTileId >= 0
+                    ? FormatAttributeSet(tileSet.GetDefaultAttributes(selectedTileId), GetTileSetAttributeList(tileSet.Kind, document))
+                    : "未設定"
+            }));
         }
 
         properties.Items.Add(new ListViewItem(new[] { "保存先", document.FilePath is null ? "未保存" : Path.GetFileName(document.FilePath) }));

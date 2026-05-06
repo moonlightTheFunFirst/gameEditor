@@ -26,6 +26,7 @@ public sealed class MapViewport : ScrollableControl
     private Point mapStampSelectionStart;
     private Point mapStampSelectionCurrent;
     private TileSetKind? mapStampLayerKind;
+    private TileSetKind selectedAttributeLayerKind = TileSetKind.Base;
     private float zoomScale = 1.0f;
     private bool showGrid = true;
 
@@ -103,6 +104,23 @@ public sealed class MapViewport : ScrollableControl
     [System.ComponentModel.Browsable(false)]
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public IReadOnlyList<int> SelectedAttributeValues { get; set; } = [];
+
+    [System.ComponentModel.Browsable(false)]
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public TileSetKind SelectedAttributeLayerKind
+    {
+        get => selectedAttributeLayerKind;
+        set
+        {
+            if (selectedAttributeLayerKind == value)
+            {
+                return;
+            }
+
+            selectedAttributeLayerKind = value;
+            Invalidate();
+        }
+    }
 
     [System.ComponentModel.Browsable(false)]
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
@@ -282,7 +300,7 @@ public sealed class MapViewport : ScrollableControl
     {
         base.OnMouseDoubleClick(e);
 
-        if (!AttributeMode || document is null || selectedTileSet is null || e.Button != MouseButtons.Left)
+        if (!AttributeMode || document is null || e.Button != MouseButtons.Left)
         {
             return;
         }
@@ -293,7 +311,8 @@ public sealed class MapViewport : ScrollableControl
             return;
         }
 
-        var current = document.GetTile(selectedTileSet.Kind, cell.X, cell.Y);
+        var layerKind = SelectedAttributeLayerKind;
+        var current = document.GetTile(layerKind, cell.X, cell.Y);
         if (current.IsEmpty)
         {
             return;
@@ -305,7 +324,7 @@ public sealed class MapViewport : ScrollableControl
             return;
         }
 
-        var change = document.SetAttributesWithChange(selectedTileSet.Kind, cell.X, cell.Y, dialog.SelectedValues);
+        var change = document.SetAttributesWithChange(layerKind, cell.X, cell.Y, dialog.SelectedValues);
         if (change is null)
         {
             return;
@@ -314,8 +333,8 @@ public sealed class MapViewport : ScrollableControl
         Invalidate(GetInvalidationRectangle(cell.X, cell.Y));
         EditCommandCommitted?.Invoke(
             this,
-            new AttributeEditCommand(GetCommandName(MapEditTool.Attribute), selectedTileSet.Kind, [change.Value]));
-        EditApplied?.Invoke(this, new MapEditAppliedEventArgs(MapEditTool.Attribute, selectedTileSet.Kind, cell, 1));
+            new AttributeEditCommand(GetCommandName(MapEditTool.Attribute), layerKind, [change.Value]));
+        EditApplied?.Invoke(this, new MapEditAppliedEventArgs(MapEditTool.Attribute, layerKind, cell, 1));
     }
 
     private void ApplyToolAt(Point location, MouseButtons button, bool isDrag)
@@ -598,12 +617,13 @@ public sealed class MapViewport : ScrollableControl
 
     private void ApplyAttribute(Point cell)
     {
-        if (!AttributeMode || document is null || selectedTileSet is null)
+        if (!AttributeMode || document is null)
         {
             return;
         }
 
-        var change = document.SetAttributesWithChange(selectedTileSet.Kind, cell.X, cell.Y, SelectedAttributeValues);
+        var layerKind = SelectedAttributeLayerKind;
+        var change = document.SetAttributesWithChange(layerKind, cell.X, cell.Y, SelectedAttributeValues);
         if (change is null)
         {
             lastEditedCell = cell;
@@ -613,7 +633,7 @@ public sealed class MapViewport : ScrollableControl
         AddAttributeStrokeChange(change.Value);
         lastEditedCell = cell;
         Invalidate(GetInvalidationRectangle(cell.X, cell.Y));
-        EditApplied?.Invoke(this, new MapEditAppliedEventArgs(MapEditTool.Attribute, selectedTileSet.Kind, cell, 1));
+        EditApplied?.Invoke(this, new MapEditAppliedEventArgs(MapEditTool.Attribute, layerKind, cell, 1));
     }
 
     private void BeginStroke(MapEditTool tool)
@@ -621,7 +641,9 @@ public sealed class MapViewport : ScrollableControl
         pendingStrokeChanges.Clear();
         pendingAttributeChanges.Clear();
         pendingStrokeTool = tool;
-        pendingStrokeLayerKind = selectedTileSet?.Kind;
+        pendingStrokeLayerKind = tool == MapEditTool.Attribute
+            ? SelectedAttributeLayerKind
+            : selectedTileSet?.Kind;
     }
 
     private void AddStrokeChange(TileChange change)
@@ -638,7 +660,7 @@ public sealed class MapViewport : ScrollableControl
     {
         if (pendingStrokeLayerKind is null)
         {
-            pendingStrokeLayerKind = selectedTileSet?.Kind;
+            pendingStrokeLayerKind = SelectedAttributeLayerKind;
         }
 
         pendingAttributeChanges.Add(change);
@@ -996,8 +1018,7 @@ public sealed class MapViewport : ScrollableControl
         {
             for (var x = 0; x < document.Width; x++)
             {
-                DrawAttributeCell(graphics, TileSetKind.Base, x, y, list);
-                DrawAttributeCell(graphics, TileSetKind.Advanced, x, y, list);
+                DrawAttributeCell(graphics, SelectedAttributeLayerKind, x, y, list);
             }
         }
     }
