@@ -68,7 +68,8 @@ public static class MapSerializer
                 Name = mapName,
                 Width = document.Width,
                 Height = document.Height,
-                TileSize = document.TileSize
+                TileSize = document.TileSize,
+                ActiveAttributeListId = document.ActiveAttributeListId
             },
             TileSets = tileSets.Select(CreateTileSet).ToList(),
             AttributeLists = document.AttributeLists.Select(CreateAttributeList).ToList(),
@@ -217,7 +218,19 @@ public static class MapSerializer
                 ParseHexColor(value.Color) ?? Color.Transparent,
                 value.DisplayText,
                 value.Memo)).ToList())).ToList();
-        document.ActiveAttributeListId = document.AttributeLists.FirstOrDefault()?.Id;
+        document.ActiveAttributeListId = ResolveAttributeListId(
+            document.AttributeLists,
+            mapFile.Map.ActiveAttributeListId ?? mapFile.TileSets.FirstOrDefault(tileSet => tileSet.AttributeListId is not null)?.AttributeListId);
+    }
+
+    private static string? ResolveAttributeListId(
+        IReadOnlyList<AttributeListDefinition> lists,
+        string? preferredAttributeListId)
+    {
+        return preferredAttributeListId is not null
+            && lists.Any(list => string.Equals(list.Id, preferredAttributeListId, StringComparison.Ordinal))
+            ? preferredAttributeListId
+            : lists.FirstOrDefault()?.Id;
     }
 
     private static void ApplyLayers(MapDocument document, IReadOnlyList<TileSet> tileSets, MapFile mapFile)

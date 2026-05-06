@@ -47,6 +47,8 @@ public sealed class MapFileMap
 
     public int TileSize { get; set; }
 
+    public string? ActiveAttributeListId { get; set; }
+
     public Dictionary<string, object?> Attributes { get; set; } = [];
 
     [JsonExtensionData]

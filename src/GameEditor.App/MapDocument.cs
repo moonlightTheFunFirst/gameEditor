@@ -171,6 +171,34 @@ public sealed class MapDocument
         return changed;
     }
 
+    public bool ResetAttributesToTileDefaults(TileSetKind kind, TileSet tileSet)
+    {
+        var changed = false;
+        var layer = GetLayer(kind);
+        for (var y = 0; y < Height; y++)
+        {
+            for (var x = 0; x < Width; x++)
+            {
+                var placement = layer[x, y];
+                if (placement.IsEmpty)
+                {
+                    continue;
+                }
+
+                var defaultAttributes = TilePlacement.FormatAttributeValues(tileSet.GetDefaultAttributes(placement.TileId));
+                if (string.Equals(placement.AttributeValuesCsv, defaultAttributes, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                layer[x, y] = placement with { AttributeValuesCsv = defaultAttributes };
+                changed = true;
+            }
+        }
+
+        return changed;
+    }
+
     public IReadOnlyList<TileChange> FloodFillWithChanges(TileSetKind kind, int x, int y, TilePlacement replacement)
     {
         if (!IsInside(x, y))
