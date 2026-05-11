@@ -20,6 +20,7 @@ public sealed class MainForm : Form
     private readonly SplitContainer rootSplit = new();
     private readonly Panel contentHostPanel = new();
     private readonly Panel startPanel = new();
+    private readonly Panel animationHostPanel = new();
     private readonly Label startMessageLabel = new();
     private readonly TreeView projectTree = new();
     private readonly SplitContainer workspaceSplit = new();
@@ -101,6 +102,7 @@ public sealed class MainForm : Form
     private bool updatingAttributeListSelector;
     private bool suppressDocumentActivation;
     private ProjectDocument? currentProject;
+    private AnimationEditorControl? animationEditor;
     private bool projectMapContextActive;
     private ActiveEditorKind activeEditorKind = ActiveEditorKind.None;
 
@@ -256,7 +258,7 @@ public sealed class MainForm : Form
 
         var editorMenu = new ToolStripMenuItem("エディタ");
         editorMenu.DropDownItems.Add("マップエディター", null, (_, _) => ShowMapEditorWorkspace(IsProjectMapContextSelected()));
-        editorMenu.DropDownItems.Add("アニメーションエディター", null, (_, _) => ShowComingSoon("アニメーションエディター", ActiveEditorKind.Animation));
+        editorMenu.DropDownItems.Add("アニメーションエディター", null, (_, _) => ShowAnimationEditorWorkspace());
         editorMenu.DropDownItems.Add("リソース", null, (_, _) => ShowComingSoon("リソース管理", ActiveEditorKind.Resource));
         editorMenu.DropDownItems.Add("エフェクトエディター", null, (_, _) => ShowComingSoon("エフェクトエディター", ActiveEditorKind.Effect));
         editorMenu.DropDownItems.Add("コリジョンエディター", null, (_, _) => ShowComingSoon("コリジョンエディター", ActiveEditorKind.Collision));
@@ -300,10 +302,39 @@ public sealed class MainForm : Form
         mapMenu.DropDownItems.Add(new ToolStripSeparator());
         mapMenu.DropDownItems.Add(closeMapMenuItem);
 
-        AddPlaceholderEditorMenu(animationMenu, "新規アニメ", ActiveEditorKind.Animation);
+        AddAnimationEditorMenu();
         AddPlaceholderEditorMenu(resourceMenu, "新規リソース", ActiveEditorKind.Resource);
         AddPlaceholderEditorMenu(effectMenu, "新規エフェクト", ActiveEditorKind.Effect);
         AddPlaceholderEditorMenu(collisionMenu, "新規コリジョン", ActiveEditorKind.Collision);
+    }
+
+    private void AddAnimationEditorMenu()
+    {
+        if (animationMenu.DropDownItems.Count > 0)
+        {
+            return;
+        }
+
+        animationMenu.DropDownItems.Add("新規サンプル", null, (_, _) =>
+        {
+            ShowAnimationEditorWorkspace();
+            animationEditor?.NewSampleAnimation();
+        });
+        animationMenu.DropDownItems.Add("開く", null, (_, _) =>
+        {
+            ShowAnimationEditorWorkspace();
+            animationEditor?.OpenAnimationFromDialog(this);
+        });
+        animationMenu.DropDownItems.Add("保存", null, (_, _) =>
+        {
+            ShowAnimationEditorWorkspace();
+            animationEditor?.SaveAnimation(this);
+        });
+        animationMenu.DropDownItems.Add("名前を付けて保存", null, (_, _) =>
+        {
+            ShowAnimationEditorWorkspace();
+            animationEditor?.SaveAnimationAs(this);
+        });
     }
 
     private void AddPlaceholderEditorMenu(ToolStripMenuItem menu, string commandName, ActiveEditorKind editorKind)
@@ -320,7 +351,7 @@ public sealed class MainForm : Form
         undoButton.Click += (_, _) => UndoMapEdit();
         redoButton.Click += (_, _) => RedoMapEdit();
         AddMapToolStripItems();
-        AddPlaceholderToolStripItems(animationToolStripItems, "新規", "新規アニメ", ActiveEditorKind.Animation);
+        AddAnimationToolStripItems();
         AddPlaceholderToolStripItems(resourceToolStripItems, "新規", "新規リソース", ActiveEditorKind.Resource);
         AddPlaceholderToolStripItems(effectToolStripItems, "新規", "新規エフェクト", ActiveEditorKind.Effect);
         AddPlaceholderToolStripItems(collisionToolStripItems, "新規", "新規コリジョン", ActiveEditorKind.Collision);
@@ -411,6 +442,33 @@ public sealed class MainForm : Form
         editorToolStrip.Items.Add(button);
     }
 
+    private void AddAnimationToolStripItems()
+    {
+        if (animationToolStripItems.Count > 0)
+        {
+            return;
+        }
+
+        animationToolStripItems.Add(new ToolStripButton("新規サンプル", null, (_, _) =>
+        {
+            ShowAnimationEditorWorkspace();
+            animationEditor?.NewSampleAnimation();
+        }));
+        animationToolStripItems.Add(new ToolStripButton("開く", null, (_, _) =>
+        {
+            ShowAnimationEditorWorkspace();
+            animationEditor?.OpenAnimationFromDialog(this);
+        }));
+        animationToolStripItems.Add(new ToolStripButton("保存", null, (_, _) => animationEditor?.SaveAnimation(this)));
+        animationToolStripItems.Add(new ToolStripButton("名前を付けて保存", null, (_, _) => animationEditor?.SaveAnimationAs(this)));
+
+        foreach (var item in animationToolStripItems)
+        {
+            item.Visible = false;
+            editorToolStrip.Items.Add(item);
+        }
+    }
+
     private StatusStrip BuildStatusStrip()
     {
         var statusStrip = new StatusStrip();
@@ -444,8 +502,13 @@ public sealed class MainForm : Form
         workspaceSplit.Panel2.Controls.Add(BuildEditorArea());
         workspaceSplit.Visible = false;
 
+        animationHostPanel.Dock = DockStyle.Fill;
+        animationHostPanel.BackColor = SystemColors.Control;
+        animationHostPanel.Visible = false;
+
         ConfigureStartPanel();
         contentHostPanel.Controls.Add(workspaceSplit);
+        contentHostPanel.Controls.Add(animationHostPanel);
         contentHostPanel.Controls.Add(startPanel);
         rootSplit.Panel2.Controls.Add(contentHostPanel);
 
@@ -543,6 +606,7 @@ public sealed class MainForm : Form
     {
         projectMapContextActive = projectContext;
         SetActiveEditor(ActiveEditorKind.Map);
+        animationHostPanel.Visible = false;
         startPanel.Visible = false;
         workspaceSplit.Visible = true;
         workspaceSplit.BringToFront();
@@ -559,8 +623,34 @@ public sealed class MainForm : Form
         SetActiveEditor(editorKind);
         startMessageLabel.Text = message;
         workspaceSplit.Visible = false;
+        animationHostPanel.Visible = false;
         startPanel.Visible = true;
         startPanel.BringToFront();
+    }
+
+    private void ShowAnimationEditorWorkspace()
+    {
+        projectMapContextActive = false;
+        SetActiveEditor(ActiveEditorKind.Animation);
+        EnsureAnimationEditor();
+        workspaceSplit.Visible = false;
+        startPanel.Visible = false;
+        animationHostPanel.Visible = true;
+        animationHostPanel.BringToFront();
+        UpdateDocumentActionsState();
+        statusLabel.Text = "アニメーションエディター";
+    }
+
+    private AnimationEditorControl EnsureAnimationEditor()
+    {
+        if (animationEditor is not null)
+        {
+            return animationEditor;
+        }
+
+        animationEditor = new AnimationEditorControl();
+        animationHostPanel.Controls.Add(animationEditor);
+        return animationEditor;
     }
 
     private void SetActiveEditor(ActiveEditorKind editorKind)
@@ -1169,7 +1259,7 @@ public sealed class MainForm : Form
                 statusLabel.Text = $"プロジェクトマップ: {tag.MapItem.Name}";
                 break;
             case ProjectTreeNodeKind.Animations:
-                ShowComingSoon("アニメエディタ", ActiveEditorKind.Animation);
+                ShowAnimationEditorWorkspace();
                 statusLabel.Text = "プロジェクト: アニメ";
                 break;
             case ProjectTreeNodeKind.Resources:
