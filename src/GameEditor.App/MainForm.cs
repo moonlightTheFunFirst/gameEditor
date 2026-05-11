@@ -1201,11 +1201,19 @@ public sealed class MainForm : Form
         document.Viewport.AttributeMode = currentEditTool == MapEditTool.Attribute;
         document.Viewport.PriorityMode = currentEditTool == MapEditTool.Priority;
         document.Viewport.SelectedDisplayPriority = GetSelectedMapDisplayPriority(selectedMapAttributeLayerKind);
+        document.Viewport.HasSelectedDisplayPriority = HasSelectedMapDisplayPriority(selectedMapAttributeLayerKind);
         document.Viewport.ShowGrid = gridMenuItem.Checked;
         document.Viewport.EditApplied += (_, args) =>
         {
             var layer = args.LayerKind is null ? "" : $" / {GetKindName(args.LayerKind.Value)}";
             statusLabel.Text = $"{GetToolName(args.Tool)}: ({args.Cell.X}, {args.Cell.Y}){layer} / {args.AffectedTiles} tiles";
+        };
+        document.Viewport.DisplayPrioritySampled += (_, args) =>
+        {
+            SetSelectedMapDisplayPriority(args.LayerKind, args.DisplayPriority, isExplicit: false);
+            RefreshAttributeValueSelector(document);
+            RefreshProperties();
+            statusLabel.Text = $"優先度参照: {args.DisplayPriority} ({args.Cell.X}, {args.Cell.Y}) / {GetKindName(args.LayerKind)}";
         };
         document.Viewport.EditCommandCommitted += (_, command) =>
         {
@@ -1283,6 +1291,7 @@ public sealed class MainForm : Form
         viewport.SelectedAttributeLayerKind = selectedMapAttributeLayerKind;
         viewport.SelectedAttributeValues = GetSelectedAttributeValues();
         viewport.SelectedDisplayPriority = GetSelectedMapDisplayPriority(selectedMapAttributeLayerKind);
+        viewport.HasSelectedDisplayPriority = HasSelectedMapDisplayPriority(selectedMapAttributeLayerKind);
         viewport.EditTool = currentEditTool;
         viewport.SecondaryEditTool = currentSecondaryEditTool;
         viewport.AttributeMode = currentEditTool == MapEditTool.Attribute;
@@ -1431,6 +1440,20 @@ public sealed class MainForm : Form
         }
 
         return IsPalettePriorityModeEnabled() ? "優先度" : "通常";
+    }
+
+    private void ClearPaletteEditModes()
+    {
+        if (!IsPaletteAttributeModeEnabled() && !IsPalettePriorityModeEnabled())
+        {
+            return;
+        }
+
+        basePaletteAttributeModeButton.Checked = false;
+        advancedPaletteAttributeModeButton.Checked = false;
+        basePalettePriorityModeButton.Checked = false;
+        advancedPalettePriorityModeButton.Checked = false;
+        UpdatePaletteAttributeContext(CurrentDocument);
     }
 
     private void SetMapGridVisible(bool visible)
@@ -1595,6 +1618,8 @@ public sealed class MainForm : Form
     private IReadOnlyList<int> selectedAdvancedChipAttributeValues = [];
     private int selectedBaseMapDisplayPriority;
     private int selectedAdvancedMapDisplayPriority;
+    private bool selectedBaseMapDisplayPriorityExplicit;
+    private bool selectedAdvancedMapDisplayPriorityExplicit;
     private int selectedBaseChipDisplayPriority;
     private int selectedAdvancedChipDisplayPriority;
 
@@ -1658,15 +1683,24 @@ public sealed class MainForm : Form
             : selectedAdvancedMapDisplayPriority;
     }
 
-    private void SetSelectedMapDisplayPriority(TileSetKind kind, int value)
+    private bool HasSelectedMapDisplayPriority(TileSetKind kind)
+    {
+        return kind == TileSetKind.Base
+            ? selectedBaseMapDisplayPriorityExplicit
+            : selectedAdvancedMapDisplayPriorityExplicit;
+    }
+
+    private void SetSelectedMapDisplayPriority(TileSetKind kind, int value, bool isExplicit)
     {
         if (kind == TileSetKind.Base)
         {
             selectedBaseMapDisplayPriority = value;
+            selectedBaseMapDisplayPriorityExplicit = isExplicit;
             return;
         }
 
         selectedAdvancedMapDisplayPriority = value;
+        selectedAdvancedMapDisplayPriorityExplicit = isExplicit;
     }
 
     private int GetSelectedChipDisplayPriority(TileSetKind kind)
@@ -1711,7 +1745,7 @@ public sealed class MainForm : Form
             return;
         }
 
-        SetSelectedMapDisplayPriority(selectedMapAttributeLayerKind, dialog.Priority);
+        SetSelectedMapDisplayPriority(selectedMapAttributeLayerKind, dialog.Priority, isExplicit: true);
         RefreshAttributeValueSelector(document);
         SyncCurrentViewportSelection();
         RefreshProperties();
@@ -3019,6 +3053,10 @@ public sealed class MainForm : Form
     private void SetEditTool(MapEditTool tool)
     {
         currentEditTool = tool;
+        if (tool is MapEditTool.Pen or MapEditTool.Fill or MapEditTool.Eraser)
+        {
+            ClearPaletteEditModes();
+        }
 
         foreach (var document in EnumerateDocuments())
         {
@@ -3026,6 +3064,7 @@ public sealed class MainForm : Form
             document.Viewport.AttributeMode = currentEditTool == MapEditTool.Attribute;
             document.Viewport.PriorityMode = currentEditTool == MapEditTool.Priority;
             document.Viewport.SelectedDisplayPriority = GetSelectedMapDisplayPriority(selectedMapAttributeLayerKind);
+            document.Viewport.HasSelectedDisplayPriority = HasSelectedMapDisplayPriority(selectedMapAttributeLayerKind);
             document.Viewport.Invalidate();
         }
 

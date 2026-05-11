@@ -14,6 +14,7 @@ public sealed class MapViewport : ScrollableControl
     private Point? lastEditedCell;
     private readonly List<TileChange> pendingStrokeChanges = [];
     private readonly List<AttributeChange> pendingAttributeChanges = [];
+    private readonly System.Windows.Forms.Timer deferredPriorityClickTimer = new();
     private MapEditTool pendingStrokeTool;
     private TileSetKind? pendingStrokeLayerKind;
     private IReadOnlyList<TileSelectionCell> selectedTileSelection = [];
@@ -26,6 +27,10 @@ public sealed class MapViewport : ScrollableControl
     private Point mapStampSelectionStart;
     private Point mapStampSelectionCurrent;
     private TileSetKind? mapStampLayerKind;
+    private bool deferredPriorityClickPending;
+    private Point deferredPriorityClickLocation;
+    private MouseButtons deferredPriorityClickButton;
+    private MapEditTool deferredPriorityClickTool;
     private TileSetKind selectedAttributeLayerKind = TileSetKind.Base;
     private int selectedDisplayPriority;
     private float zoomScale = 1.0f;
@@ -39,11 +44,15 @@ public sealed class MapViewport : ScrollableControl
         ResizeRedraw = true;
         AutoScroll = true;
         TabStop = true;
+        deferredPriorityClickTimer.Interval = SystemInformation.DoubleClickTime + 25;
+        deferredPriorityClickTimer.Tick += (_, _) => CommitDeferredPriorityClick();
     }
 
     public event EventHandler<MapEditAppliedEventArgs>? EditApplied;
 
     public event EventHandler<IMapEditCommand>? EditCommandCommitted;
+
+    public event EventHandler<MapPrioritySampledEventArgs>? DisplayPrioritySampled;
 
     [System.ComponentModel.Browsable(false)]
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
@@ -133,6 +142,10 @@ public sealed class MapViewport : ScrollableControl
 
     [System.ComponentModel.Browsable(false)]
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public bool HasSelectedDisplayPriority { get; set; }
+
+    [System.ComponentModel.Browsable(false)]
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public int SelectedDisplayPriority
     {
         get => selectedDisplayPriority;
@@ -174,6 +187,16 @@ public sealed class MapViewport : ScrollableControl
             selectedTileSelection = value.ToArray();
             InvalidateStampPreview();
         }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            deferredPriorityClickTimer.Dispose();
+        }
+
+        base.Dispose(disposing);
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -225,9 +248,28 @@ public sealed class MapViewport : ScrollableControl
             return;
         }
 
-        UpdateStampPreview(e.Location, ResolveTool(e.Button));
-        BeginStroke(ResolveTool(e.Button));
-        ApplyToolAt(e.Location, e.Button, isDrag: false);
+        var tool = ResolveTool(e.Button);
+        if (deferredPriorityClickPending)
+        {
+            if (IsPriorityDoubleClick(e, tool))
+            {
+                CancelDeferredPriorityClick();
+                activeMouseButton = MouseButtons.None;
+                return;
+            }
+
+            CommitDeferredPriorityClick();
+        }
+
+        UpdateStampPreview(e.Location, tool);
+        if (ShouldDeferPriorityClick(e, tool))
+        {
+            BeginDeferredPriorityClick(e.Location, e.Button, tool);
+            return;
+        }
+
+        BeginStroke(tool);
+        ApplyToolAt(e.Location, e.Button, isDrag: false, tool);
     }
 
     protected override void OnMouseMove(MouseEventArgs e)
@@ -242,6 +284,11 @@ public sealed class MapViewport : ScrollableControl
         if (mapStampSelectionActive)
         {
             UpdateMapStampSelection(e.Location);
+            return;
+        }
+
+        if (TryPromoteDeferredPriorityClickToDrag(e.Location))
+        {
             return;
         }
 
@@ -268,6 +315,13 @@ public sealed class MapViewport : ScrollableControl
 
         if (e.Button == activeMouseButton)
         {
+            if (deferredPriorityClickPending)
+            {
+                activeMouseButton = MouseButtons.None;
+                lastEditedCell = null;
+                return;
+            }
+
             CommitStroke();
             activeMouseButton = MouseButtons.None;
             lastEditedCell = null;
@@ -316,6 +370,9 @@ public sealed class MapViewport : ScrollableControl
     protected override void OnMouseDoubleClick(MouseEventArgs e)
     {
         base.OnMouseDoubleClick(e);
+        CancelDeferredPriorityClick();
+        activeMouseButton = MouseButtons.None;
+        lastEditedCell = null;
 
         if ((!AttributeMode && !PriorityMode) || document is null || e.Button != MouseButtons.Left)
         {
@@ -376,14 +433,14 @@ public sealed class MapViewport : ScrollableControl
         EditApplied?.Invoke(this, new MapEditAppliedEventArgs(MapEditTool.Priority, layerKind, cell, 1));
     }
 
-    private void ApplyToolAt(Point location, MouseButtons button, bool isDrag)
+    private void ApplyToolAt(Point location, MouseButtons button, bool isDrag, MapEditTool? toolOverride = null)
     {
         if (document is null)
         {
             return;
         }
 
-        var tool = ResolveTool(button);
+        var tool = toolOverride ?? ResolveTool(button);
         var cell = GetEffectiveCellFromLocation(location, tool);
 
         if (!document.IsInside(cell.X, cell.Y) || (isDrag && lastEditedCell == cell))
@@ -704,6 +761,23 @@ public sealed class MapViewport : ScrollableControl
         }
 
         var layerKind = SelectedAttributeLayerKind;
+        var current = document.GetTile(layerKind, cell.X, cell.Y);
+        if (current.IsEmpty)
+        {
+            lastEditedCell = cell;
+            return;
+        }
+
+        if (!HasSelectedDisplayPriority)
+        {
+            SelectedDisplayPriority = current.DisplayPriority;
+            lastEditedCell = cell;
+            DisplayPrioritySampled?.Invoke(
+                this,
+                new MapPrioritySampledEventArgs(layerKind, cell, current.DisplayPriority));
+            return;
+        }
+
         var change = document.SetDisplayPriorityWithChange(layerKind, cell.X, cell.Y, SelectedDisplayPriority);
         if (change is null)
         {
@@ -804,6 +878,88 @@ public sealed class MapViewport : ScrollableControl
     private bool IsStampPreviewActive(MapEditTool tool)
     {
         return tool == MapEditTool.Pen || tool == MapEditTool.Attribute || tool == MapEditTool.Priority;
+    }
+
+    private static bool ShouldDeferPriorityClick(MouseEventArgs e, MapEditTool tool)
+    {
+        return tool == MapEditTool.Priority
+            && e.Button == MouseButtons.Left
+            && e.Clicks == 1;
+    }
+
+    private static bool IsPriorityDoubleClick(MouseEventArgs e, MapEditTool tool)
+    {
+        return tool == MapEditTool.Priority
+            && e.Button == MouseButtons.Left
+            && e.Clicks > 1;
+    }
+
+    private void BeginDeferredPriorityClick(Point location, MouseButtons button, MapEditTool tool)
+    {
+        deferredPriorityClickPending = true;
+        deferredPriorityClickLocation = location;
+        deferredPriorityClickButton = button;
+        deferredPriorityClickTool = tool;
+        deferredPriorityClickTimer.Stop();
+        deferredPriorityClickTimer.Start();
+    }
+
+    private void CancelDeferredPriorityClick()
+    {
+        if (!deferredPriorityClickPending)
+        {
+            return;
+        }
+
+        deferredPriorityClickTimer.Stop();
+        deferredPriorityClickPending = false;
+    }
+
+    private void CommitDeferredPriorityClick()
+    {
+        if (!deferredPriorityClickPending)
+        {
+            return;
+        }
+
+        var location = deferredPriorityClickLocation;
+        var button = deferredPriorityClickButton;
+        var tool = deferredPriorityClickTool;
+        deferredPriorityClickTimer.Stop();
+        deferredPriorityClickPending = false;
+
+        BeginStroke(tool);
+        ApplyToolAt(location, button, isDrag: false, tool);
+        CommitStroke();
+        activeMouseButton = MouseButtons.None;
+        lastEditedCell = null;
+    }
+
+    private bool TryPromoteDeferredPriorityClickToDrag(Point location)
+    {
+        if (!deferredPriorityClickPending
+            || document is null
+            || activeMouseButton == MouseButtons.None)
+        {
+            return false;
+        }
+
+        var startCell = GetEffectiveCellFromLocation(deferredPriorityClickLocation, deferredPriorityClickTool);
+        var currentCell = GetEffectiveCellFromLocation(location, deferredPriorityClickTool);
+        if (startCell == currentCell)
+        {
+            return true;
+        }
+
+        var startLocation = deferredPriorityClickLocation;
+        var button = deferredPriorityClickButton;
+        var tool = deferredPriorityClickTool;
+        deferredPriorityClickTimer.Stop();
+        deferredPriorityClickPending = false;
+        BeginStroke(tool);
+        ApplyToolAt(startLocation, button, isDrag: false, tool);
+        ApplyToolAt(location, button, isDrag: true, tool);
+        return true;
     }
 
     private bool HasActiveStamp()
