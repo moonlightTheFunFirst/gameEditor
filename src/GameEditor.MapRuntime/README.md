@@ -1,7 +1,7 @@
 # GameEditor.MapRuntime
 
 `GameEditor.MapRuntime` is a small C ABI library for loading `.gemap.json` files exported by gameEditor.
-The first preview executable is intentionally simple: it loads a map, prints the parsed data, and renders each layer as a compact text grid.
+`GameEditor.MapPreview.exe` is a Win32/GDI preview viewer that renders the map, attributes, and display priorities from the exported JSON.
 
 ## Build
 
@@ -27,7 +27,13 @@ Single-configuration generators may place it directly under `Output/MapRuntime`.
 ## Run
 
 ```powershell
-Output/MapRuntime/Release/GameEditor.MapPreview.exe --no-wait testData/NewMap.gemap.json
+Output/MapRuntime/Release/GameEditor.MapPreview.exe --asset-root . testData/NewMap.gemap.json
+```
+
+For build or CI checks without opening a window:
+
+```powershell
+Output/MapRuntime/Release/GameEditor.MapPreview.exe --validate --asset-root . testData/NewMap.gemap.json
 ```
 
 The WinForms editor looks for `GameEditor.MapPreview.exe` near the application output and under `Output/MapRuntime`.

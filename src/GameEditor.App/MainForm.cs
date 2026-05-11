@@ -2825,6 +2825,8 @@ public sealed class MainForm : Form
                 UseShellExecute = false,
                 WorkingDirectory = Path.GetDirectoryName(previewExecutable) ?? AppContext.BaseDirectory
             };
+            startInfo.ArgumentList.Add("--asset-root");
+            startInfo.ArgumentList.Add(AppContext.BaseDirectory);
             startInfo.ArgumentList.Add(previewMapPath);
             System.Diagnostics.Process.Start(startInfo);
             statusLabel.Text = $"プレビューを起動しました: {Path.GetFileName(previewMapPath)}";
