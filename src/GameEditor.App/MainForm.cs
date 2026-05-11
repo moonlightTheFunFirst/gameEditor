@@ -661,7 +661,8 @@ public sealed class MainForm : Form
         resourceMenu.Visible = editorKind == ActiveEditorKind.Resource;
         effectMenu.Visible = editorKind == ActiveEditorKind.Effect;
         collisionMenu.Visible = editorKind == ActiveEditorKind.Collision;
-        editorToolStrip.Visible = editorKind != ActiveEditorKind.None;
+        editorToolStrip.Visible = editorKind != ActiveEditorKind.None
+            && editorKind != ActiveEditorKind.Animation;
         SetToolStripItemsVisible(mapToolStripItems, editorKind == ActiveEditorKind.Map);
         SetToolStripItemsVisible(animationToolStripItems, editorKind == ActiveEditorKind.Animation);
         SetToolStripItemsVisible(resourceToolStripItems, editorKind == ActiveEditorKind.Resource);
