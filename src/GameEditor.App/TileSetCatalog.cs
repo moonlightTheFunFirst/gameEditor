@@ -33,13 +33,23 @@ public static class TileSetCatalog
         var definitions = new List<TileSetDefinition>();
         foreach (var path in files)
         {
-            var hasTransparency = ContainsTransparentColor(path);
+            var imageInfo = InspectImage(path);
+            var hasTransparency = imageInfo.HasTransparentColor;
             var kind = hasTransparency ? TileSetKind.Advanced : TileSetKind.Base;
             var id = Path.GetFileNameWithoutExtension(path);
             var name = Path.GetFileNameWithoutExtension(path);
             var imagePath = Path.Combine("resources", "tiles", Path.GetFileName(path)).Replace('\\', '/');
             var attributeFilePath = GetAttributeFilePath(path);
             var attributes = LoadAttributes(attributeFilePath);
+            var tileSizeAttributes = CreateTileSizeAttributes(attributes);
+            var legacyAttributes = tileSizeAttributes.TryGetValue(TileSetDefinition.LegacyTileSize, out var legacy)
+                ? legacy
+                : new TileSetTileSizeAttributes(
+                    attributes.AttributeListId,
+                    attributes.TileAttributes.ToDictionary(
+                        pair => pair.Key,
+                        pair => TilePlacement.FormatAttributeValues(pair.Value)),
+                    attributes.TilePriorities.ToDictionary(pair => pair.Key, pair => pair.Value));
 
             definitions.Add(new TileSetDefinition(
                 id,
@@ -47,14 +57,15 @@ public static class TileSetCatalog
                 kind,
                 path,
                 imagePath,
+                imageInfo.Width,
+                imageInfo.Height,
                 hasTransparency ? TransparentColor : null,
                 attributeFilePath,
-                attributes.AttributeListId,
+                legacyAttributes.AttributeListId,
                 attributes.AttributeLists.Select(ToAttributeListDefinition).ToList(),
-                attributes.TileAttributes.ToDictionary(
-                    pair => pair.Key,
-                    pair => TilePlacement.FormatAttributeValues(pair.Value)),
-                attributes.TilePriorities.ToDictionary(pair => pair.Key, pair => pair.Value)));
+                legacyAttributes.TileAttributes.ToDictionary(),
+                legacyAttributes.TilePriorities.ToDictionary(),
+                tileSizeAttributes));
         }
 
         return definitions;
@@ -65,14 +76,31 @@ public static class TileSetCatalog
         TileSet tileSet,
         IReadOnlyList<AttributeListDefinition> attributeLists)
     {
+        var tileSizeAttributes = definition.TileSizeAttributes.ToDictionary(
+            pair => pair.Key,
+            pair => CloneAttributes(pair.Value));
+        tileSizeAttributes[tileSet.TileSize] = new TileSetTileSizeAttributes(
+            tileSet.AttributeListId,
+            tileSet.TileAttributes.ToDictionary(),
+            tileSet.TilePriorities.ToDictionary());
+        var legacyAttributes = tileSizeAttributes.TryGetValue(TileSetDefinition.LegacyTileSize, out var legacy)
+            ? legacy
+            : new TileSetTileSizeAttributes(
+                definition.AttributeListId,
+                definition.TileAttributes.ToDictionary(),
+                definition.TilePriorities.ToDictionary());
+
         var file = new TileSetAttributeFile
         {
-            AttributeListId = tileSet.AttributeListId,
+            AttributeListId = legacyAttributes.AttributeListId,
             AttributeLists = attributeLists.Select(ToMapFileAttributeList).ToList(),
-            TileAttributes = tileSet.TileAttributes.ToDictionary(
+            TileAttributes = legacyAttributes.TileAttributes.ToDictionary(
                 pair => pair.Key,
                 pair => TilePlacement.ParseAttributeValues(pair.Value).ToList()),
-            TilePriorities = tileSet.TilePriorities.ToDictionary(pair => pair.Key, pair => pair.Value)
+            TilePriorities = legacyAttributes.TilePriorities.ToDictionary(pair => pair.Key, pair => pair.Value),
+            TileSizeData = tileSizeAttributes
+                .OrderBy(pair => pair.Key)
+                .ToDictionary(pair => pair.Key, pair => ToTileSizeAttributeFile(pair.Value))
         };
 
         var json = JsonSerializer.Serialize(file, JsonOptions);
@@ -103,6 +131,52 @@ public static class TileSetCatalog
         {
             return new TileSetAttributeFile();
         }
+    }
+
+    private static Dictionary<int, TileSetTileSizeAttributes> CreateTileSizeAttributes(TileSetAttributeFile file)
+    {
+        var result = new Dictionary<int, TileSetTileSizeAttributes>();
+        foreach (var (tileSize, data) in file.TileSizeData.Where(pair => pair.Key > 0))
+        {
+            result[tileSize] = new TileSetTileSizeAttributes(
+                data.AttributeListId,
+                data.TileAttributes.ToDictionary(
+                    pair => pair.Key,
+                    pair => TilePlacement.FormatAttributeValues(pair.Value)),
+                data.TilePriorities.ToDictionary(pair => pair.Key, pair => pair.Value));
+        }
+
+        if (!result.ContainsKey(TileSetDefinition.LegacyTileSize))
+        {
+            result[TileSetDefinition.LegacyTileSize] = new TileSetTileSizeAttributes(
+                file.AttributeListId,
+                file.TileAttributes.ToDictionary(
+                    pair => pair.Key,
+                    pair => TilePlacement.FormatAttributeValues(pair.Value)),
+                file.TilePriorities.ToDictionary(pair => pair.Key, pair => pair.Value));
+        }
+
+        return result;
+    }
+
+    private static TileSetTileSizeAttributes CloneAttributes(TileSetTileSizeAttributes attributes)
+    {
+        return new TileSetTileSizeAttributes(
+            attributes.AttributeListId,
+            attributes.TileAttributes.ToDictionary(),
+            attributes.TilePriorities.ToDictionary());
+    }
+
+    private static TileSetTileSizeAttributeFile ToTileSizeAttributeFile(TileSetTileSizeAttributes attributes)
+    {
+        return new TileSetTileSizeAttributeFile
+        {
+            AttributeListId = attributes.AttributeListId,
+            TileAttributes = attributes.TileAttributes.ToDictionary(
+                pair => pair.Key,
+                pair => TilePlacement.ParseAttributeValues(pair.Value).ToList()),
+            TilePriorities = attributes.TilePriorities.ToDictionary(pair => pair.Key, pair => pair.Value)
+        };
     }
 
     private static AttributeListDefinition ToAttributeListDefinition(MapFileAttributeList list)
@@ -159,10 +233,11 @@ public static class TileSetCatalog
         return color.A == 0 ? null : $"#{color.R:X2}{color.G:X2}{color.B:X2}";
     }
 
-    private static bool ContainsTransparentColor(string path)
+    private static (bool HasTransparentColor, int Width, int Height) InspectImage(string path)
     {
         using var image = new Bitmap(path);
         var transparentArgb = TransparentColor.ToArgb();
+        var hasTransparentColor = false;
 
         for (var y = 0; y < image.Height; y++)
         {
@@ -170,12 +245,18 @@ public static class TileSetCatalog
             {
                 if (image.GetPixel(x, y).ToArgb() == transparentArgb)
                 {
-                    return true;
+                    hasTransparentColor = true;
+                    break;
                 }
+            }
+
+            if (hasTransparentColor)
+            {
+                break;
             }
         }
 
-        return false;
+        return (hasTransparentColor, image.Width, image.Height);
     }
 
     private static string? ResolveTilesDirectory()

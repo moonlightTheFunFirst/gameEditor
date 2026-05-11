@@ -8,6 +8,8 @@ public sealed class MainForm : Form
     private const int TilePanelExtraWidth = 10;
     private const int TilePanelInitialWidth = (InitialTileSize * TileSetColumns) + (TilePanelPadding * 2) + TilePanelExtraWidth;
     private const int WmSetRedraw = 0x000B;
+    private const int MinimumSelectableTileSize = 8;
+    private const int MaximumSelectableTileSize = 128;
     private static readonly Color EmptyWorkspaceColor = Color.FromArgb(44, 46, 50);
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
@@ -876,7 +878,19 @@ public sealed class MainForm : Form
 
     private void NewMap()
     {
-        using var dialog = new NewMapDialog();
+        var tileSizeCandidates = GetAvailableTileSizesForSelectedTileSets();
+        if (tileSizeCandidates.Count == 0)
+        {
+            MessageBox.Show(
+                this,
+                "選択中のベース/アドバンスの両方で使用できるチップサイズがありません。",
+                "チップサイズ",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return;
+        }
+
+        using var dialog = new NewMapDialog(tileSizeCandidates, InitialTileSize);
         if (dialog.ShowDialog(this) != DialogResult.OK)
         {
             return;
@@ -2132,23 +2146,16 @@ public sealed class MainForm : Form
         TileSet tileSet,
         IReadOnlyList<AttributeListDefinition> attributeLists)
     {
-        definition.AttributeListId = tileSet.AttributeListId;
         definition.AttributeLists.Clear();
         definition.AttributeLists.AddRange(attributeLists.Select(list => new AttributeListDefinition(
             list.Id,
             list.Name,
             list.Values.Select(value => new AttributeDefinition(value.Value, value.Name, value.Color, value.DisplayText, value.Memo)).ToList())));
-        definition.TileAttributes.Clear();
-        foreach (var (tileId, value) in tileSet.TileAttributes)
-        {
-            definition.TileAttributes[tileId] = value;
-        }
-
-        definition.TilePriorities.Clear();
-        foreach (var (tileId, value) in tileSet.TilePriorities)
-        {
-            definition.TilePriorities[tileId] = value;
-        }
+        definition.SetAttributesForTileSize(
+            tileSet.TileSize,
+            tileSet.AttributeListId,
+            tileSet.TileAttributes.ToDictionary(),
+            tileSet.TilePriorities.ToDictionary());
     }
 
     private bool ConfirmSaveTileAttributes(TileSetKind kind)
@@ -2286,10 +2293,19 @@ public sealed class MainForm : Form
         var document = CurrentDocument;
         if (document is null)
         {
-            SetPreviewTileSet(kind, definition);
-            activePalette = tileSetTabs.SelectedIndex == 1 ? advancedPalette : basePalette;
-            UpdatePaletteAttributeContext(null);
-            UpdateSelectedTile();
+            try
+            {
+                SetPreviewTileSet(kind, definition);
+                activePalette = tileSetTabs.SelectedIndex == 1 ? advancedPalette : basePalette;
+                UpdatePaletteAttributeContext(null);
+                UpdateSelectedTile();
+            }
+            catch (Exception ex)
+            {
+                RestoreTileSetSelector(kind);
+                MessageBox.Show(this, ex.Message, "タイルセット読み込みエラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+
             return;
         }
 
@@ -2303,7 +2319,8 @@ public sealed class MainForm : Form
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "Tileset load error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            RestoreTileSetSelector(kind);
+            MessageBox.Show(this, ex.Message, "タイルセット読み込みエラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 
@@ -2317,6 +2334,29 @@ public sealed class MainForm : Form
         var baseTileSet = CreateTileSet(baseDefinition, GetTileSetIndex(TileSetKind.Base), tileSize);
         var advancedTileSet = CreateTileSet(advancedDefinition, GetTileSetIndex(TileSetKind.Advanced), tileSize);
         return [baseTileSet, advancedTileSet];
+    }
+
+    private IReadOnlyList<int> GetAvailableTileSizesForSelectedTileSets()
+    {
+        var baseDefinition = GetSelectedTileSetDefinition(TileSetKind.Base);
+        var advancedDefinition = GetSelectedTileSetDefinition(TileSetKind.Advanced);
+        if (baseDefinition is null || advancedDefinition is null)
+        {
+            return [];
+        }
+
+        return GetSupportedTileSizes(baseDefinition)
+            .Intersect(GetSupportedTileSizes(advancedDefinition))
+            .ToArray();
+    }
+
+    private static IReadOnlyList<int> GetSupportedTileSizes(TileSetDefinition definition)
+    {
+        var maxTileSize = Math.Min(MaximumSelectableTileSize, Math.Min(definition.ImageWidth, definition.ImageHeight));
+        return Enumerable
+            .Range(MinimumSelectableTileSize, Math.Max(0, maxTileSize - MinimumSelectableTileSize + 1))
+            .Where(definition.SupportsTileSize)
+            .ToArray();
     }
 
     private void ApplyCatalogTileSets(MapEditorDocument document, bool markDirty)
@@ -2429,7 +2469,7 @@ public sealed class MainForm : Form
 
     private void SetPreviewTileSet(TileSetKind kind, TileSetDefinition definition)
     {
-        var replacement = CreateTileSet(definition, GetTileSetIndex(kind), InitialTileSize);
+        var replacement = CreateTileSet(definition, GetTileSetIndex(kind), GetPreviewTileSize(definition));
 
         if (kind == TileSetKind.Base)
         {
@@ -2486,6 +2526,13 @@ public sealed class MainForm : Form
 
     private static TileSet CreateTileSet(TileSetDefinition definition, int index, int tileSize)
     {
+        if (!definition.SupportsTileSize(tileSize))
+        {
+            throw new InvalidOperationException(
+                $"「{definition.Name}」の画像サイズ {definition.ImageWidth}x{definition.ImageHeight} は、チップサイズ {tileSize} で割り切れません。");
+        }
+
+        var attributes = definition.GetAttributesForTileSize(tileSize);
         return TileSet.Load(
             index,
             GetTileSetId(definition.Kind),
@@ -2495,9 +2542,25 @@ public sealed class MainForm : Form
             definition.ImagePath,
             tileSize,
             definition.TransparentColor,
-            definition.AttributeListId,
-            definition.TileAttributes.ToDictionary(),
-            definition.TilePriorities.ToDictionary());
+            attributes.AttributeListId ?? definition.AttributeListId,
+            attributes.TileAttributes.ToDictionary(),
+            attributes.TilePriorities.ToDictionary());
+    }
+
+    private static int GetPreviewTileSize(TileSetDefinition definition)
+    {
+        if (definition.SupportsTileSize(InitialTileSize))
+        {
+            return InitialTileSize;
+        }
+
+        var tileSize = GetSupportedTileSizes(definition).FirstOrDefault();
+        if (tileSize > 0)
+        {
+            return tileSize;
+        }
+
+        throw new InvalidOperationException($"「{definition.Name}」で使用できるチップサイズがありません。");
     }
 
     private static int GetTileSetIndex(TileSetKind kind)

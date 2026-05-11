@@ -53,6 +53,11 @@ public static class MapSerializer
 
     public static MapFile CreateMapFile(MapDocument document, IReadOnlyList<TileSet> tileSets, string mapName)
     {
+        if (tileSets.Any(tileSet => tileSet.TileSize != document.TileSize))
+        {
+            throw new InvalidOperationException("Map and tileset tile sizes must match.");
+        }
+
         return new MapFile
         {
             Header = new MapFileHeader
@@ -185,6 +190,10 @@ public static class MapSerializer
             var kind = ParseKind(tileSetFile.Kind);
             var imagePath = ResolveReferencedPath(mapFilePath, tileSetFile.Image);
             var tileSize = tileSetFile.TileSize > 0 ? tileSetFile.TileSize : mapFile.Map.TileSize;
+            if (tileSize != mapFile.Map.TileSize)
+            {
+                throw new InvalidOperationException("Different tile sizes cannot be mixed in the same map.");
+            }
 
             tileSets.Add(TileSet.Load(
                 index,
