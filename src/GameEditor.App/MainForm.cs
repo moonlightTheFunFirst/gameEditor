@@ -60,6 +60,8 @@ public sealed class MainForm : Form
     private readonly ToolStripMenuItem redoMenuItem = new("やり直し");
     private readonly ToolStripMenuItem saveMapEditMenuItem = new("上書き保存");
     private readonly ToolStripMenuItem saveMapAsEditMenuItem = new("名前を付けて保存");
+    private readonly ToolStripMenuItem previewMapMenuItem = new("プレビュー");
+    private readonly ToolStripButton previewMapButton = new("プレビュー");
     private readonly ToolStripMenuItem gridMenuItem = new("グリッド");
     private readonly ToolStripMenuItem closeMapMenuItem = new("閉じる");
     private readonly ToolStripMenuItem mapMenu = new("マップ");
@@ -242,6 +244,7 @@ public sealed class MainForm : Form
         saveMapEditMenuItem.Click += (_, _) => SaveMap();
         saveMapAsEditMenuItem.ShortcutKeys = Keys.Control | Keys.Shift | Keys.S;
         saveMapAsEditMenuItem.Click += (_, _) => SaveMapAs();
+        previewMapMenuItem.Click += (_, _) => PreviewCurrentMap();
         closeMapMenuItem.Click += (_, _) => CloseCurrentMap();
 
         var editMenu = new ToolStripMenuItem("編集");
@@ -293,6 +296,7 @@ public sealed class MainForm : Form
         mapMenu.DropDownItems.Add(new ToolStripSeparator());
         mapMenu.DropDownItems.Add("インポート", null, (_, _) => ImportMap());
         mapMenu.DropDownItems.Add("エクスポート", null, (_, _) => ExportCurrentMap());
+        mapMenu.DropDownItems.Add(previewMapMenuItem);
         mapMenu.DropDownItems.Add(new ToolStripSeparator());
         mapMenu.DropDownItems.Add(closeMapMenuItem);
 
@@ -355,6 +359,8 @@ public sealed class MainForm : Form
         mapToolStripItems.Add(new ToolStripButton("新規", null, (_, _) => NewMap()));
         mapToolStripItems.Add(new ToolStripButton("開く", null, (_, _) => OpenMap()));
         mapToolStripItems.Add(new ToolStripButton("保存", null, (_, _) => SaveMap()));
+        previewMapButton.Click += (_, _) => PreviewCurrentMap();
+        mapToolStripItems.Add(previewMapButton);
         mapToolStripItems.Add(new ToolStripSeparator());
         mapToolStripItems.Add(undoButton);
         mapToolStripItems.Add(redoButton);
@@ -2786,6 +2792,92 @@ public sealed class MainForm : Form
         }
     }
 
+    private void PreviewCurrentMap()
+    {
+        var document = CurrentDocument;
+        if (document is null)
+        {
+            statusLabel.Text = "プレビューするマップがありません";
+            return;
+        }
+
+        var previewExecutable = TryResolvePreviewExecutablePath();
+        if (previewExecutable is null)
+        {
+            MessageBox.Show(
+                this,
+                "プレビューアが見つかりません。build_map_preview.bat を実行してプレビューアをビルドしてください。",
+                "プレビューエラー",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+            statusLabel.Text = "プレビューアが見つかりません";
+            return;
+        }
+
+        try
+        {
+            var previewMapPath = CreatePreviewMapFilePath(document);
+            MapSerializer.Save(previewMapPath, document.Map, document.TileSets, document.Name);
+
+            var startInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = previewExecutable,
+                UseShellExecute = false,
+                WorkingDirectory = Path.GetDirectoryName(previewExecutable) ?? AppContext.BaseDirectory
+            };
+            startInfo.ArgumentList.Add(previewMapPath);
+            System.Diagnostics.Process.Start(startInfo);
+            statusLabel.Text = $"プレビューを起動しました: {Path.GetFileName(previewMapPath)}";
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "プレビューエラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            statusLabel.Text = "プレビューの起動に失敗しました";
+        }
+    }
+
+    private static string CreatePreviewMapFilePath(MapEditorDocument document)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "gameEditor", "preview");
+        Directory.CreateDirectory(directory);
+        return Path.Combine(directory, $"{SanitizeFileName(document.Name)}-{Guid.NewGuid():N}.gemap.json");
+    }
+
+    private static string SanitizeFileName(string name)
+    {
+        var invalidChars = Path.GetInvalidFileNameChars();
+        var chars = name.Select(ch => invalidChars.Contains(ch) ? '_' : ch).ToArray();
+        var sanitized = new string(chars).Trim();
+        return string.IsNullOrWhiteSpace(sanitized) ? "Map" : sanitized;
+    }
+
+    private static string? TryResolvePreviewExecutablePath()
+    {
+        return EnumeratePreviewExecutableCandidates()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(File.Exists);
+    }
+
+    private static IEnumerable<string> EnumeratePreviewExecutableCandidates()
+    {
+        const string executableName = "GameEditor.MapPreview.exe";
+
+        yield return Path.Combine(AppContext.BaseDirectory, executableName);
+        yield return Path.Combine(AppContext.BaseDirectory, "preview", executableName);
+        yield return Path.Combine(Environment.CurrentDirectory, executableName);
+
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            yield return Path.Combine(directory.FullName, "Output", "MapRuntime", executableName);
+            yield return Path.Combine(directory.FullName, "Output", "MapRuntime", "Debug", executableName);
+            yield return Path.Combine(directory.FullName, "Output", "MapRuntime", "Release", executableName);
+            yield return Path.Combine(directory.FullName, "src", "GameEditor.MapRuntime", "build", "Debug", executableName);
+            yield return Path.Combine(directory.FullName, "src", "GameEditor.MapRuntime", "build", "Release", executableName);
+            directory = directory.Parent;
+        }
+    }
+
     private bool SaveMapTo(MapEditorDocument document, string path)
     {
         try
@@ -3165,6 +3257,11 @@ public sealed class MainForm : Form
             mapToolStripItems[2].Enabled = canSave;
         }
 
+        if (mapToolStripItems.Count > 3)
+        {
+            mapToolStripItems[3].Enabled = hasDocument;
+        }
+
         if (mapMenu.DropDownItems.Count > 2)
         {
             mapMenu.DropDownItems[2].Enabled = canSave;
@@ -3181,6 +3278,8 @@ public sealed class MainForm : Form
         redoMenuItem.Enabled = redoButton.Enabled;
         saveMapEditMenuItem.Enabled = activeEditorKind == ActiveEditorKind.Map && hasDocument;
         saveMapAsEditMenuItem.Enabled = saveMapEditMenuItem.Enabled;
+        previewMapMenuItem.Enabled = saveMapEditMenuItem.Enabled;
+        previewMapButton.Enabled = saveMapEditMenuItem.Enabled;
         gridMenuItem.Enabled = activeEditorKind == ActiveEditorKind.Map;
         closeMapMenuItem.Enabled = hasDocument;
         closeMapTabMenuItem.Enabled = hasDocument;
