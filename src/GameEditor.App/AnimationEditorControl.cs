@@ -44,7 +44,8 @@ public sealed class AnimationEditorControl : UserControl
             Fps = 8,
             Loop = true
         };
-        for (var i = 0; i < Math.Min(4, option.TileSet.TileCount); i++)
+        var frameCount = Math.Min(8, option.TileSet.TileCount);
+        for (var i = 0; i < frameCount; i++)
         {
             clip.Frames.Add(new AnimationFrameKey
             {
@@ -53,8 +54,20 @@ public sealed class AnimationEditorControl : UserControl
             });
         }
 
-        clip.Events.Add(new AnimationEventKey { TimeMs = clip.FrameDurationMs, Name = "footstep" });
-        clip.Events.Add(new AnimationEventKey { TimeMs = clip.FrameDurationMs * 3, Name = "footstep" });
+        if (clip.Frames.Count > 1)
+        {
+            clip.Events.Add(new AnimationEventKey { TimeMs = clip.FrameDurationMs, Name = "footstep" });
+        }
+
+        if (clip.Frames.Count > 3)
+        {
+            clip.Events.Add(new AnimationEventKey { TimeMs = clip.FrameDurationMs * 3, Name = "footstep" });
+        }
+
+        if (clip.Frames.Count > 5)
+        {
+            clip.Events.Add(new AnimationEventKey { TimeMs = clip.FrameDurationMs * 5, Name = "cast" });
+        }
         AnimationSerializer.NormalizeFrameTimes(clip);
         LoadDocument(new AnimationDocument(clip));
     }
@@ -203,6 +216,8 @@ public sealed class AnimationEditorControl : UserControl
         buttonPanel.Controls[0].Click += (_, _) => AddFrameFromSelection();
         buttonPanel.Controls.Add(new Button { Text = "差し込み", AutoSize = true });
         buttonPanel.Controls[1].Click += (_, _) => InsertFrameFromSelection();
+        buttonPanel.Controls.Add(new Button { Text = "フレーム更新", AutoSize = true });
+        buttonPanel.Controls[2].Click += (_, _) => UpdateSelectedFrameFromSelection();
 
         panel.Controls.Add(palette);
         panel.Controls.Add(buttonPanel);
@@ -403,6 +418,30 @@ public sealed class AnimationEditorControl : UserControl
     private void InsertFrameFromSelection()
     {
         AddFrameFromSelection(insert: true);
+    }
+
+    private void UpdateSelectedFrameFromSelection()
+    {
+        if (document is null
+            || document.Clip.Frames.Count == 0
+            || GetSelectedTileSetOption() is not { } option
+            || palette.SelectedTileId < 0)
+        {
+            return;
+        }
+
+        var frame = document.Clip.Frames[selectedFrameIndex];
+        if (string.Equals(frame.TileSetId, option.TileSet.Id, StringComparison.Ordinal)
+            && frame.TileId == palette.SelectedTileId)
+        {
+            return;
+        }
+
+        frame.TileSetId = option.TileSet.Id;
+        frame.TileId = palette.SelectedTileId;
+        RefreshTimeline();
+        MarkDirty();
+        SelectFrame(selectedFrameIndex);
     }
 
     private void AddFrameFromSelection(bool insert)
